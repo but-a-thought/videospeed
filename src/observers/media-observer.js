@@ -226,6 +226,14 @@ class MediaElementObserver {
       return false;
     }
 
+    const visibilityOverride = this.siteHandler.getMediaVisibilityOverride(media);
+    if (visibilityOverride !== null) {
+      window.VSC.logger.debug(
+        `Using site media visibility override: ${visibilityOverride ? 'visible' : 'hidden'}`
+      );
+      return !visibilityOverride;
+    }
+
     // For video elements, check visibility - only hide controllers for truly invisible media elements
     const style = window.getComputedStyle(media);
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {

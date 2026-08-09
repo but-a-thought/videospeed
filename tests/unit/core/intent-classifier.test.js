@@ -297,6 +297,42 @@ describe('IntentClassifier side-effect 1.0 demotion', () => {
     expect(classifier.classify(context(video, 1.0, 250))).toBe(verdicts().AUTONOMOUS);
   });
 
+  it('demotes a TikTok volume-side-effect reset without weakening generic sites', () => {
+    const tiktokClassifier = new window.VSC.IntentClassifier({
+      rules: { volumeChangeResetsRate: true },
+    });
+    const genericClassifier = new window.VSC.IntentClassifier();
+    const video = document.createElement('video');
+
+    clickSequence(tiktokClassifier, video);
+    clickSequence(genericClassifier, video);
+    tiktokClassifier.observeNormalResetSideEffect(video, 210);
+    genericClassifier.observeNormalResetSideEffect(video, 210);
+
+    expect(tiktokClassifier.classify(context(video, 1.0, 250))).toBe(verdicts().AUTONOMOUS);
+    expect(genericClassifier.classify(context(video, 1.0, 250))).toBe(verdicts().USER_INTENT);
+  });
+
+  it('keeps volume-reset evidence media-scoped and time-bounded', () => {
+    const classifier = new window.VSC.IntentClassifier({
+      rules: { volumeChangeResetsRate: true },
+    });
+    const videoA = document.createElement('video');
+    const videoB = document.createElement('video');
+
+    clickSequence(classifier, videoA);
+    clickSequence(classifier, videoB);
+    classifier.observeNormalResetSideEffect(videoA, 210);
+
+    expect(classifier.classify(context(videoA, 1.0, 250))).toBe(verdicts().AUTONOMOUS);
+    expect(classifier.classify(context(videoB, 1.0, 250))).toBe(verdicts().USER_INTENT);
+
+    const expired = 210 + window.VSC.IntentClassifier.NORMAL_RESET_SIDE_EFFECT_WINDOW_MS + 1;
+    classifier.observeClick({ timeStamp: expired - 100 }, videoA);
+    classifier.observeClick({ timeStamp: expired - 10 }, videoA);
+    expect(classifier.classify(context(videoA, 1.0, expired))).toBe(verdicts().USER_INTENT);
+  });
+
   it('expires seek and init evidence after their windows', () => {
     const classifier = new window.VSC.IntentClassifier();
     const video = document.createElement('video');

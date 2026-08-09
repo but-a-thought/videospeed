@@ -32,6 +32,36 @@ class BaseSiteHandler {
   }
 
   /**
+   * Override the generic media-element visibility decision when a site's
+   * visible player is not represented by the <video> element itself.
+   * @param {HTMLMediaElement} _media
+   * @returns {boolean|null} True/false to override, null for generic handling
+   */
+  getMediaVisibilityOverride(_media) {
+    return null;
+  }
+
+  /**
+   * Whether controllers should repair their DOM placement when a site
+   * reconciles or reparents its player while preserving the media element.
+   * @returns {boolean}
+   */
+  shouldRepairControllerPlacement() {
+    return false;
+  }
+
+  /**
+   * Return a delay for re-applying the authoritative speed after a media
+   * event, or null when the generic arbitration lifecycle is sufficient.
+   * @param {HTMLMediaElement} _media
+   * @param {string} _eventType
+   * @returns {number|null}
+   */
+  getRateRestoreDelay(_media, _eventType) {
+    return null;
+  }
+
+  /**
    * Declare site-specific intent-classifier rule activations.
    *
    * The classifier owns what each flag MEANS (signature rates, binding,
@@ -111,6 +141,22 @@ class BaseSiteHandler {
    */
   resolveGestureMedia(_event, _mediaElements) {
     return null;
+  }
+
+  /**
+   * Classify a page click before it enters the speed-intent evidence ledger.
+   * Site handlers may suppress known non-speed controls and mark a possible
+   * reset side effect while preserving ordinary click attribution.
+   * @param {Event} event
+   * @param {HTMLMediaElement[]} mediaElements
+   * @returns {{media: HTMLMediaElement|null, recordIntent: boolean, normalResetSideEffect: boolean}}
+   */
+  classifyPageClick(event, mediaElements) {
+    return {
+      media: this.resolveGestureMedia(event, mediaElements),
+      recordIntent: true,
+      normalResetSideEffect: false,
+    };
   }
 
   /**

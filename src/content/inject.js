@@ -325,7 +325,8 @@ class VideoSpeedExtension {
       }
 
       if (video.vsc) {
-        this.logger.debug('Video already has controller attached');
+        this.logger.debug('Video already has controller attached; checking placement');
+        video.vsc.ensureAttached?.();
         return;
       }
 

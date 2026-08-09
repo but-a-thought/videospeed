@@ -139,6 +139,22 @@ getControllerPosition(parent, _video) {
 
 Override this when a site's player has overlays or stacking contexts that would cover the default position.
 
+#### `getMediaVisibilityOverride(media)`
+
+Return `true` or `false` when the site's visible player surface is not represented by the media element's own computed style; return `null` for generic handling. For example, a reactive player may keep an active `<video>` transparent while rendering a poster or composited layer in a visible player card. The override feeds automatic visibility only and never defeats the user's “start hidden” preference or V-key override.
+
+#### `shouldRepairControllerPlacement()`
+
+Return `true` when a virtualized player can preserve or reparent its `<video>` while reconciling away extension-owned DOM. The controller then watches its immediate host parent and reinserts the same controller if it becomes detached or stranded in an old player wrapper. Keep this opt-in because ordinary players do not need a placement observer.
+
+#### `getRateRestoreDelay(media, eventType)`
+
+Return a delay in milliseconds when a known non-speed media event needs a post-handler authoritative speed restore; return `null` for normal arbitration. This is intended for players that reset `playbackRate` while processing controls such as volume. The delayed restore reclaims the existing speed authority after the site's own event handlers settle.
+
+#### `classifyPageClick(event, mediaElements)`
+
+Return `{ media, recordIntent, normalResetSideEffect }` to refine click evidence before speed arbitration. Use `recordIntent: false` for controls that cannot select playback speed. Set `normalResetSideEffect: true` only when that control is known to make the player write `playbackRate = 1.0`; the classifier treats it as short-lived, media-scoped negative evidence. The base implementation preserves ordinary click attribution.
+
 ### Playback
 
 These are the core operations. Each method **owns** the operation entirely -- the base class provides the default implementation, and your override replaces it completely.
@@ -148,6 +164,7 @@ These are the core operations. Each method **owns** the operation entirely -- th
 Called whenever the extension sets playback speed. This includes user-initiated speed changes, programmatic changes, and fight-back speed restoration.
 
 **Default behavior:**
+
 ```js
 handleSpeedChange(video, speed) {
   video.playbackRate = speed;
@@ -170,12 +187,12 @@ handleSpeedChange(video, speed) {
 
 **When is this called?**
 
-| Scenario | Example |
-|---|---|
-| User changes speed | Keyboard shortcut, popup slider |
-| Extension restores speed | Page load with "remember speed" enabled |
-| Fight-back | Site tried to reset speed, extension restores it |
-| Cooldown restore | Site changed speed during cooldown window |
+| Scenario                 | Example                                          |
+| ------------------------ | ------------------------------------------------ |
+| User changes speed       | Keyboard shortcut, popup slider                  |
+| Extension restores speed | Page load with "remember speed" enabled          |
+| Fight-back               | Site tried to reset speed, extension restores it |
+| Cooldown restore         | Site changed speed during cooldown window        |
 
 All paths go through `handleSpeedChange`. There are no direct `video.playbackRate` assignments in the extension's core.
 
@@ -184,6 +201,7 @@ All paths go through `handleSpeedChange`. There are no direct `video.playbackRat
 Called when the user seeks forward or backward. The `seekSeconds` value is negative for rewind.
 
 **Default behavior:**
+
 ```js
 handleSeek(video, seekSeconds) {
   const newTime = Math.max(0, Math.min(video.duration, video.currentTime + seekSeconds));
@@ -232,13 +250,13 @@ When a site externally changes `video.playbackRate` (e.g., the site's own speed 
 
 ## Existing handlers
 
-| Handler | Site | Key overrides |
-|---|---|---|
-| `YouTubeHandler` | youtube.com | Controller positioning, autohide CSS forwarding, video filtering |
-| `NetflixHandler` | netflix.com | Controller positioning, custom seeking via postMessage |
-| `FacebookHandler` | facebook.com | Controller positioning, dynamic content observer |
-| `AmazonHandler` | amazon.com, primevideo.com | Controller positioning, size-based video filtering |
-| `AppleHandler` | tv.apple.com | Controller positioning, shadow DOM video detection |
+| Handler           | Site                       | Key overrides                                                    |
+| ----------------- | -------------------------- | ---------------------------------------------------------------- |
+| `YouTubeHandler`  | youtube.com                | Controller positioning, autohide CSS forwarding, video filtering |
+| `NetflixHandler`  | netflix.com                | Controller positioning, custom seeking via postMessage           |
+| `FacebookHandler` | facebook.com               | Controller positioning, dynamic content observer                 |
+| `AmazonHandler`   | amazon.com, primevideo.com | Controller positioning, size-based video filtering               |
+| `AppleHandler`    | tv.apple.com               | Controller positioning, shadow DOM video detection               |
 
 ## Testing
 

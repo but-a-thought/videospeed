@@ -63,6 +63,10 @@ const TARGET_RULES = Object.freeze({
   // activations through getClassifierRules() (e.g. YouTube's hold-for-2x,
   // #1554); this module owns what each flag means, never which host gets it.
   pointerHoldArms: false,
+  // Some reactive players reset playbackRate as a side effect of their
+  // volume UI. Site handlers opt in because this is not a universal media
+  // contract and should not weaken native Normal-speed choices elsewhere.
+  volumeChangeResetsRate: false,
 });
 
 const USER_GESTURE_WINDOW_MS = 300; // ms after a gesture in which a ratechange reads as intent
@@ -82,6 +86,9 @@ const SEEK_RESET_WINDOW_MS = 1000;
 // plausibly traverse a speed menu. The grace period covers resets shortly
 // after controller attachment; lifecycle restores and loadstart re-arm it.
 const MEDIA_INIT_GRACE_MS = 2000;
+// A site-declared volume/control interaction can explain a following 1.0
+// reset. Keep this media-local and short-lived like seek evidence.
+const NORMAL_RESET_SIDE_EFFECT_WINDOW_MS = 1000;
 // YouTube's documented long-press boost is specifically 2x. Keeping this
 // narrow means a native menu choice or shortcut remains durable USER_INTENT.
 const TEMPORARY_HOLD_RATE = 2.0;
@@ -155,6 +162,7 @@ class IntentClassifier {
     // WeakMaps, nothing persisted.
     this.seeksByMedia = new WeakMap();
     this.mediaInitByMedia = new WeakMap();
+    this.normalResetSideEffectsByMedia = new WeakMap();
   }
 
   /** Any user input at all — presence evidence only, never intent. */
@@ -244,6 +252,18 @@ class IntentClassifier {
   observeMediaInit(media, timeStamp) {
     if (media) {
       this.mediaInitByMedia.set(media, timeStamp);
+    }
+  }
+
+  /**
+   * Record site-declared evidence that an ordinary media control may trigger
+   * an autonomous reset to 1.0. This is negative evidence only.
+   * @param {HTMLMediaElement} media
+   * @param {number} timeStamp
+   */
+  observeNormalResetSideEffect(media, timeStamp) {
+    if (media && this.rules.volumeChangeResetsRate) {
+      this.normalResetSideEffectsByMedia.set(media, timeStamp);
     }
   }
 
@@ -582,7 +602,12 @@ class IntentClassifier {
       typeof ts === 'number' && ctx.timeStamp - ts >= 0 && ctx.timeStamp - ts < windowMs;
     return (
       within(this.seeksByMedia.get(ctx.media), SEEK_RESET_WINDOW_MS) ||
-      within(this.mediaInitByMedia.get(ctx.media), MEDIA_INIT_GRACE_MS)
+      within(this.mediaInitByMedia.get(ctx.media), MEDIA_INIT_GRACE_MS) ||
+      (this.rules.volumeChangeResetsRate &&
+        within(
+          this.normalResetSideEffectsByMedia.get(ctx.media),
+          NORMAL_RESET_SIDE_EFFECT_WINDOW_MS
+        ))
     );
   }
 
@@ -695,6 +720,7 @@ class IntentClassifier {
     this.clicksByMedia.delete(media);
     this.seeksByMedia.delete(media);
     this.mediaInitByMedia.delete(media);
+    this.normalResetSideEffectsByMedia.delete(media);
     for (const [pointerId, entry] of this.pointerOwners) {
       if (entry.media === media) {
         this.removePointer(pointerId);
@@ -719,6 +745,7 @@ class IntentClassifier {
     this.activePointersByMedia = new WeakMap();
     this.seeksByMedia = new WeakMap();
     this.mediaInitByMedia = new WeakMap();
+    this.normalResetSideEffectsByMedia = new WeakMap();
   }
 }
 
@@ -729,6 +756,7 @@ window.VSC.IntentClassifier.USER_GESTURE_WINDOW_MS = USER_GESTURE_WINDOW_MS;
 window.VSC.IntentClassifier.CLICK_SEQUENCE_WINDOW_MS = CLICK_SEQUENCE_WINDOW_MS;
 window.VSC.IntentClassifier.SEEK_RESET_WINDOW_MS = SEEK_RESET_WINDOW_MS;
 window.VSC.IntentClassifier.MEDIA_INIT_GRACE_MS = MEDIA_INIT_GRACE_MS;
+window.VSC.IntentClassifier.NORMAL_RESET_SIDE_EFFECT_WINDOW_MS = NORMAL_RESET_SIDE_EFFECT_WINDOW_MS;
 window.VSC.IntentClassifier.QUIET_CONTEXT_MS = QUIET_CONTEXT_MS;
 window.VSC.IntentClassifier.TEMPORARY_HOLD_RATE = TEMPORARY_HOLD_RATE;
 window.VSC.IntentClassifier.LONG_PRESS_CLICK_MS = LONG_PRESS_CLICK_MS;

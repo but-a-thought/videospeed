@@ -777,6 +777,42 @@ describe('EventManager', () => {
     expect(fightCount(eventManager.arbitration, mockVideo)).toBe(1);
   });
 
+  it('restores authoritative speed after a TikTok volume-side-effect reset', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    config.settings.lastSpeed = 1.5;
+
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    eventManager.actionHandler = actionHandler;
+    const classifier = eventManager.arbitration.classifier;
+    classifier.rules = {
+      ...window.VSC.IntentClassifier.TARGET_RULES,
+      ...new window.VSC.TikTokHandler().getClassifierRules(),
+    };
+
+    const video = createMockVideo({ playbackRate: 1.5 });
+    video.vsc = { div: document.createElement('div'), speedIndicator: { textContent: '1.50' } };
+    Object.defineProperty(video, 'readyState', { value: 4, configurable: true });
+    classifier.observeClick({ timeStamp: 100 }, video);
+    classifier.observeClick({ timeStamp: 200 }, video);
+    classifier.observeNormalResetSideEffect(video, 210);
+
+    video.playbackRate = 1.0;
+    eventManager.handleRateChange({
+      composedPath: () => [video],
+      target: video,
+      detail: null,
+      timeStamp: 250,
+      stopImmediatePropagation() {},
+    });
+
+    expect(video.playbackRate).toBe(1.5);
+    expect(config.settings.lastSpeed).toBe(1.5);
+    expect(fightCount(eventManager.arbitration, video)).toBe(1);
+    eventManager.cleanup();
+  });
+
   it('composes classifier rules from the detected site handler at construction', async () => {
     const config = window.VSC.videoSpeedConfig;
     await config.load();
@@ -799,7 +835,17 @@ describe('EventManager', () => {
     // Without a declaring handler, construction falls back to generic rules.
     const genericManager = new window.VSC.EventManager(config, null);
     expect(genericManager.arbitration.classifier.rules.pointerHoldArms).toBe(false);
+    expect(genericManager.arbitration.classifier.rules.volumeChangeResetsRate).toBe(false);
     genericManager.cleanup();
+
+    manager.currentHandler = new window.VSC.TikTokHandler();
+    try {
+      const tiktokManager = new window.VSC.EventManager(config, null);
+      expect(tiktokManager.arbitration.classifier.rules.volumeChangeResetsRate).toBe(true);
+      tiktokManager.cleanup();
+    } finally {
+      manager.currentHandler = previousHandler;
+    }
   });
 
   it('resolves a direct composed-path gesture before consulting a site handler', async () => {
@@ -849,6 +895,41 @@ describe('EventManager', () => {
 
     getControlled.mockRestore();
     siteResolver.mockRestore();
+  });
+
+  it('records TikTok volume clicks as side effects without speed intent', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+
+    const eventManager = new window.VSC.EventManager(config, null);
+    eventManager.arbitration.classifier.rules = {
+      ...window.VSC.IntentClassifier.TARGET_RULES,
+      volumeChangeResetsRate: true,
+    };
+    const video = createMockVideo();
+    const getControlled = vi
+      .spyOn(window.VSC.stateManager, 'getControlledElements')
+      .mockReturnValue([video]);
+    const classify = vi
+      .spyOn(window.VSC.siteHandlerManager, 'classifyPageClick')
+      .mockReturnValue({ media: video, recordIntent: false, normalResetSideEffect: true });
+    const sideEffect = vi.spyOn(
+      eventManager.arbitration.classifier,
+      'observeNormalResetSideEffect'
+    );
+    const observeClick = vi.spyOn(eventManager.arbitration.classifier, 'observeClick');
+    const observeInput = vi.spyOn(eventManager.arbitration.classifier, 'observeInput');
+    eventManager.setupUserGestureListener(document);
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(sideEffect).toHaveBeenCalledWith(video, expect.any(Number));
+    expect(observeClick).not.toHaveBeenCalled();
+    expect(observeInput).toHaveBeenCalledOnce();
+
+    eventManager.cleanup();
+    getControlled.mockRestore();
+    classify.mockRestore();
   });
 
   it('does not replace Chromium legacy mousewheel dispatch with a document wheel listener', async () => {

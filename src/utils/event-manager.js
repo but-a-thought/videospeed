@@ -244,7 +244,17 @@ class EventManager {
       if (event.target?.closest?.('vsc-controller')) {
         return;
       }
-      this.arbitration.classifier.observeClick(event, this.resolveGestureMedia(event));
+      const click = this.classifyPageClick(event);
+      if (click.normalResetSideEffect && click.media) {
+        this.arbitration.classifier.observeNormalResetSideEffect(click.media, event.timeStamp);
+      }
+      if (click.recordIntent) {
+        this.arbitration.classifier.observeClick(event, click.media);
+      } else {
+        // A known non-speed control remains presence evidence for the quiet
+        // axis without becoming speed-menu intent evidence.
+        this.arbitration.classifier.observeInput(event);
+      }
     };
     const pointerDownHandler = (event) => {
       if (event.target?.closest?.('vsc-controller')) {
@@ -358,6 +368,26 @@ class EventManager {
 
     const resolved = window.VSC.siteHandlerManager?.resolveGestureMedia?.(event, mediaElements);
     return controlled.has(resolved) ? resolved : null;
+  }
+
+  /**
+   * Let the active site handler refine page-click evidence while validating
+   * that any returned media still belongs to the controlled set.
+   * @param {Event} event
+   * @returns {{media: HTMLMediaElement|null, recordIntent: boolean, normalResetSideEffect: boolean}}
+   */
+  classifyPageClick(event) {
+    const mediaElements = window.VSC.stateManager
+      ? window.VSC.stateManager.getControlledElements()
+      : [];
+    const controlled = new Set(mediaElements);
+    const defaultMedia = this.resolveGestureMedia(event);
+    const result = window.VSC.siteHandlerManager?.classifyPageClick?.(event, mediaElements) || {};
+    return {
+      media: controlled.has(result.media) ? result.media : defaultMedia,
+      recordIntent: result.recordIntent !== false,
+      normalResetSideEffect: result.normalResetSideEffect === true,
+    };
   }
 
   /**

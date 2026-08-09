@@ -14,6 +14,7 @@ class SiteHandlerManager {
       window.VSC.AmazonHandler,
       window.VSC.AppleHandler,
       window.VSC.DailymotionHandler,
+      window.VSC.TikTokHandler,
       window.VSC.FrameHandler,
     ];
   }
@@ -64,6 +65,28 @@ class SiteHandlerManager {
   getControllerPosition(parent, video) {
     const handler = this.getCurrentHandler();
     return handler.getControllerPosition(parent, video);
+  }
+
+  /**
+   * @param {HTMLMediaElement} media
+   * @returns {boolean|null}
+   */
+  getMediaVisibilityOverride(media) {
+    return this.getCurrentHandler().getMediaVisibilityOverride(media);
+  }
+
+  /** @returns {boolean} */
+  shouldRepairControllerPlacement() {
+    return this.getCurrentHandler().shouldRepairControllerPlacement();
+  }
+
+  /**
+   * @param {HTMLMediaElement} media
+   * @param {string} eventType
+   * @returns {number|null}
+   */
+  getRateRestoreDelay(media, eventType) {
+    return this.getCurrentHandler().getRateRestoreDelay(media, eventType);
   }
 
   /**
@@ -119,6 +142,15 @@ class SiteHandlerManager {
    */
   resolveGestureMedia(event, mediaElements) {
     return this.getCurrentHandler().resolveGestureMedia(event, mediaElements);
+  }
+
+  /**
+   * @param {Event} event
+   * @param {HTMLMediaElement[]} mediaElements
+   * @returns {{media: HTMLMediaElement|null, recordIntent: boolean, normalResetSideEffect: boolean}}
+   */
+  classifyPageClick(event, mediaElements) {
+    return this.getCurrentHandler().classifyPageClick(event, mediaElements);
   }
 
   /**

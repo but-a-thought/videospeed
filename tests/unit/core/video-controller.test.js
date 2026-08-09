@@ -169,6 +169,109 @@ describe('VideoController', () => {
     expect(controller.div.dataset.vscVisibility).toBe('show');
   });
 
+  it('uses a site visibility override instead of transparent video styling', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const mockVideo = createMockVideo();
+    mockVideo.style.opacity = '0';
+    mockDOM.container.appendChild(mockVideo);
+    const override = vi
+      .spyOn(window.VSC.siteHandlerManager, 'getMediaVisibilityOverride')
+      .mockReturnValue(true);
+
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+
+    expect(controller.isVideoVisible()).toBe(true);
+    override.mockRestore();
+  });
+
+  it('repairs a TikTok controller detached or stranded by player recycling', async () => {
+    const manager = window.VSC.siteHandlerManager;
+    const previousHandler = manager.currentHandler;
+    manager.currentHandler = new window.VSC.TikTokHandler();
+
+    try {
+      const config = window.VSC.videoSpeedConfig;
+      await config.load();
+      vi.useFakeTimers();
+      const eventManager = new window.VSC.EventManager(config, null);
+      const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+      const firstPlayer = document.createElement('div');
+      firstPlayer.className = 'tiktok-web-player';
+      const firstLayer = document.createElement('div');
+      const video = createMockVideo();
+      firstLayer.appendChild(video);
+      firstPlayer.appendChild(firstLayer);
+      mockDOM.container.appendChild(firstPlayer);
+      const controller = new window.VSC.VideoController(video, firstLayer, config, actionHandler);
+
+      expect(controller.div.parentNode).toBe(firstPlayer);
+      controller.div.remove();
+      controller.ensureAttached();
+      await vi.runAllTimersAsync();
+      expect(controller.div.parentNode).toBe(firstPlayer);
+
+      const secondPlayer = document.createElement('div');
+      secondPlayer.className = 'tiktok-web-player';
+      const secondLayer = document.createElement('div');
+      secondPlayer.appendChild(secondLayer);
+      mockDOM.container.appendChild(secondPlayer);
+      secondLayer.appendChild(video);
+
+      controller.ensureAttached();
+      await vi.runAllTimersAsync();
+      expect(controller.div.parentNode).toBe(secondPlayer);
+
+      controller.remove();
+      expect(controller.controllerPlacementObserver).toBeNull();
+    } finally {
+      manager.currentHandler = previousHandler;
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores TikTok speed after the volume-control event settles', async () => {
+    const manager = window.VSC.siteHandlerManager;
+    const previousHandler = manager.currentHandler;
+    manager.currentHandler = new window.VSC.TikTokHandler();
+
+    try {
+      const config = window.VSC.videoSpeedConfig;
+      await config.load();
+      vi.useFakeTimers();
+      config.settings.lastSpeed = 1.5;
+      const eventManager = new window.VSC.EventManager(config, null);
+      const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+      const player = document.createElement('div');
+      player.className = 'tiktok-web-player';
+      const layer = document.createElement('div');
+      const video = createMockVideo({ playbackRate: 1.5 });
+      layer.appendChild(video);
+      player.appendChild(layer);
+      mockDOM.container.appendChild(player);
+      const controller = new window.VSC.VideoController(video, layer, config, actionHandler);
+      const noteUserSet = vi.spyOn(eventManager.arbitration, 'noteUserSet');
+
+      video.playbackRate = 1;
+      video.dispatchEvent({ type: 'volumechange', timeStamp: 500 });
+      await vi.advanceTimersByTimeAsync(99);
+      expect(video.playbackRate).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(video.playbackRate).toBe(1.5);
+      expect(video.defaultPlaybackRate).toBe(1.5);
+      expect(noteUserSet).toHaveBeenCalledWith(video, 1.5);
+      expect(config.settings.lastSpeed).toBe(1.5);
+
+      controller.remove();
+    } finally {
+      manager.currentHandler = previousHandler;
+      vi.useRealTimers();
+    }
+  });
+
   it('VideoController should handle video without source', async () => {
     const config = window.VSC.videoSpeedConfig;
     await config.load();
@@ -222,6 +325,31 @@ describe('VideoController', () => {
     // Verify cleanup
     expect(mockVideo.vsc).toBe(undefined);
     expect(window.VSC.stateManager.controllers.size).toBe(0);
+  });
+
+  it('tracks and removes TikTok volume-reset evidence', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    eventManager.arbitration.classifier.rules = {
+      ...window.VSC.IntentClassifier.TARGET_RULES,
+      volumeChangeResetsRate: true,
+    };
+    const observe = vi.spyOn(eventManager.arbitration.classifier, 'observeNormalResetSideEffect');
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const mockVideo = createMockVideo();
+    const removeEventListener = vi.spyOn(mockVideo, 'removeEventListener');
+    mockDOM.container.appendChild(mockVideo);
+
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const volumeHandler = controller.handleVolumeChangeEvidence;
+    mockVideo.dispatchEvent({ type: 'volumechange', timeStamp: 123 });
+
+    expect(observe).toHaveBeenCalledWith(mockVideo, 123);
+
+    controller.remove();
+    expect(removeEventListener).toHaveBeenCalledWith('volumechange', volumeHandler);
+    expect(controller.handleVolumeChangeEvidence).toBeNull();
   });
 
   it('clears a pending controller flash timer during removal', async () => {

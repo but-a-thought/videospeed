@@ -195,6 +195,18 @@ describe('Inject', () => {
     expect(video.vsc instanceof window.VSC.VideoController).toBe(true);
   });
 
+  it('rechecks controller placement when a recycled video is rediscovered', () => {
+    extension = window.VSC_controller;
+    const video = createMockVideo({ readyState: 4 });
+    const ensureAttached = vi.fn();
+    video.vsc = { ensureAttached };
+    mockDOM.container.appendChild(video);
+
+    extension.onVideoFound(video, mockDOM.container);
+
+    expect(ensureAttached).toHaveBeenCalledTimes(1);
+  });
+
   it('onVideoFound defers controller when video has no src (no-source placeholder)', () => {
     extension = window.VSC_controller;
     expect(extension).toBeDefined();

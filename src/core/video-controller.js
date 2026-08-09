@@ -49,6 +49,11 @@ class VideoController {
     // Create UI
     this.div = this.initializeControls();
 
+    // TikTok and similar virtualized players can preserve a media element
+    // while reconciling away extension-owned children. Opted-in handlers get
+    // a narrow parent observer that repairs the existing controller host.
+    this.setupControllerPlacementRepair();
+
     // Set up event handlers
     this.setupEventHandlers();
 
@@ -229,6 +234,66 @@ class VideoController {
     window.VSC.logger.debug(`Controller inserted using ${positioning.insertionMethod} method`);
   }
 
+  /** Set up repair for sites that recycle player DOM around a live video. @private */
+  setupControllerPlacementRepair() {
+    if (!window.VSC.siteHandlerManager.shouldRepairControllerPlacement()) {
+      return;
+    }
+
+    this.controllerPlacementObserver = new MutationObserver(() => this.ensureAttached());
+    this.observeControllerParent();
+  }
+
+  /** Observe only the current host parent, avoiding a document-wide observer. @private */
+  observeControllerParent() {
+    if (!this.controllerPlacementObserver) {
+      return;
+    }
+    this.controllerPlacementObserver.disconnect();
+    if (this.div?.parentNode) {
+      this.controllerPlacementObserver.observe(this.div.parentNode, { childList: true });
+    }
+  }
+
+  /**
+   * Reinsert a controller that TikTok detached or left in a recycled player.
+   * Safe to call from both mutation callbacks and media rediscovery.
+   */
+  ensureAttached() {
+    if (
+      !window.VSC.siteHandlerManager.shouldRepairControllerPlacement() ||
+      this.video.vsc !== this ||
+      !this.video.isConnected ||
+      !this.div
+    ) {
+      return;
+    }
+
+    const placement = window.VSC.siteHandlerManager.getControllerPosition(
+      this.video.parentElement || this.parent,
+      this.video
+    );
+    const placementIsCurrent =
+      this.div.isConnected &&
+      (placement.insertionMethod === 'firstChild'
+        ? this.div.parentNode === placement.insertionPoint
+        : placement.insertionPoint?.parentNode === this.div.parentNode);
+    if (placementIsCurrent || this.controllerRepairTimer !== undefined) {
+      return;
+    }
+
+    this.controllerRepairTimer = setTimeout(() => {
+      this.controllerRepairTimer = undefined;
+      if (this.video.vsc !== this || !this.video.isConnected) {
+        return;
+      }
+      this.insertIntoDOM(this.video.ownerDocument, this.div);
+      this.observeControllerParent();
+      this.updateVisibility();
+      window.VSC.logger.info('Reattached controller after player DOM recycling');
+    }, 0);
+  }
+
   /**
    * Set up event handlers for media events
    * @private
@@ -255,6 +320,22 @@ class VideoController {
       this.arbitration.clearEchoTransaction(this.video);
       this.arbitration.classifier?.observeMediaInit(this.video, event.timeStamp);
     };
+    this.handleVolumeChangeEvidence = (event) => {
+      this.arbitration.classifier?.observeNormalResetSideEffect(this.video, event.timeStamp);
+      const restoreDelay = window.VSC.siteHandlerManager.getRateRestoreDelay(
+        this.video,
+        event.type
+      );
+      if (restoreDelay !== null) {
+        if (this.rateRestoreTimer !== undefined) {
+          clearTimeout(this.rateRestoreTimer);
+        }
+        this.rateRestoreTimer = setTimeout(() => {
+          this.rateRestoreTimer = undefined;
+          this.restoreAuthoritativeSpeedAfterSiteControl(event.type);
+        }, restoreDelay);
+      }
+    };
 
     // `seeking` covers resets during an active seek; `seeked` refreshes the
     // evidence window after slow seeks while retaining its lifecycle restore.
@@ -264,8 +345,13 @@ class VideoController {
     this.video.addEventListener('seeking', this.handleSeekEvidence);
     this.video.addEventListener('seeked', this.handleSeek);
     this.video.addEventListener('loadstart', this.handleMediaInit);
+    if (this.arbitration.classifier?.rules?.volumeChangeResetsRate) {
+      this.video.addEventListener('volumechange', this.handleVolumeChangeEvidence);
+    }
 
-    window.VSC.logger.debug('Added media event handlers: play, seeking, seeked, loadstart');
+    window.VSC.logger.debug(
+      'Added media event handlers: play, seeking, seeked, loadstart, optional volumechange'
+    );
   }
 
   /**
@@ -308,6 +394,19 @@ class VideoController {
       this.div.flashTimer = undefined;
     }
 
+    if (this.controllerRepairTimer !== undefined) {
+      clearTimeout(this.controllerRepairTimer);
+      this.controllerRepairTimer = undefined;
+    }
+    if (this.rateRestoreTimer !== undefined) {
+      clearTimeout(this.rateRestoreTimer);
+      this.rateRestoreTimer = undefined;
+    }
+    if (this.controllerPlacementObserver) {
+      this.controllerPlacementObserver.disconnect();
+      this.controllerPlacementObserver = null;
+    }
+
     // Remove DOM element
     if (this.div && this.div.parentNode) {
       this.div.remove();
@@ -329,6 +428,10 @@ class VideoController {
     if (this.handleMediaInit) {
       this.video.removeEventListener('loadstart', this.handleMediaInit);
       this.handleMediaInit = null;
+    }
+    if (this.handleVolumeChangeEvidence) {
+      this.video.removeEventListener('volumechange', this.handleVolumeChangeEvidence);
+      this.handleVolumeChangeEvidence = null;
     }
     if (this.handleLoadedMetadata) {
       this.video.removeEventListener('loadedmetadata', this.handleLoadedMetadata);
@@ -353,6 +456,28 @@ class VideoController {
     delete this.video.vsc;
 
     window.VSC.logger.debug('VideoController removed successfully');
+  }
+
+  /**
+   * A site-declared normal control must not replace the user's speed
+   * authority. Reclaiming the same value also clears any local fight state
+   * created by the site's transient reset before this delayed callback.
+   * @param {string} eventType
+   * @private
+   */
+  restoreAuthoritativeSpeedAfterSiteControl(eventType) {
+    if (this.video.vsc !== this || !this.video.isConnected || !this.actionHandler) {
+      return;
+    }
+    const target = this.config.settings.lastSpeed;
+    if (!Number.isFinite(target) || Math.abs(this.video.playbackRate - target) <= 0.01) {
+      return;
+    }
+
+    window.VSC.logger.info(`${eventType}: restoring authoritative speed to ${target}`);
+    this.arbitration.noteUserSet(this.video, target);
+    this.actionHandler.writeRate(this.video, target);
+    this.actionHandler.syncIndicator(this.video, target);
   }
 
   /**
@@ -384,6 +509,11 @@ class VideoController {
     // Check if video is still connected to DOM
     if (!this.video.isConnected) {
       return false;
+    }
+
+    const visibilityOverride = window.VSC.siteHandlerManager.getMediaVisibilityOverride(this.video);
+    if (visibilityOverride !== null) {
+      return visibilityOverride;
     }
 
     // Check computed style for visibility
