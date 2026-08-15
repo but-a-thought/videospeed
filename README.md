@@ -1,7 +1,5 @@
 # Video Speed Controller — Community
 
-[![Chrome Web Store][chrome-web-store-version]][chrome-web-store-link] [![Chrome Web Store Users][chrome-web-store-users-badge]][chrome-web-store-link] [![Chrome Web Store Users][chrome-web-store-stars]][chrome-web-store-link]
-
 **Video Speed Controller** gives you fine-grained control over any HTML5 video
 or audio element, on any site.
 
@@ -10,10 +8,6 @@ It preserves the original extension's behavior while adding Firefox support and 
 fixes for sites and extensions such as Hover Zoom.
 
 ## Install
-
-### Chrome
-
-[Install the Chrome version from the Chrome Web Store][chrome-web-store-link].
 
 ### Firefox 128+
 
@@ -107,11 +101,7 @@ for them to take effect.
 
 ## License
 
-(MIT License) - Copyright (c) 2014 Ilya Grigorik
+Licensed under the [MIT License](LICENSE).
 
-[chrome-web-store-version]: https://img.shields.io/chrome-web-store/v/nffaoalbilbmmfgbnbgppjihopabppdk?label=Chrome%20Web%20Store
-[chrome-web-store-users-badge]: https://img.shields.io/chrome-web-store/users/nffaoalbilbmmfgbnbgppjihopabppdk
-[chrome-web-store-stars]: https://img.shields.io/chrome-web-store/stars/nffaoalbilbmmfgbnbgppjihopabppdk
-[github-release-badge]: https://img.shields.io/github/v/release/igrigorik/videospeed
-[chrome-web-store-link]: https://chromewebstore.google.com/detail/video-speed-controller/nffaoalbilbmmfgbnbgppjihopabppdk
-[github-release-link]: https://github.com/igrigorik/videospeed/releases
+- Original project copyright © 2014 Ilya Grigorik.
+- Community fork modifications copyright © 2026 but-a-thought.
