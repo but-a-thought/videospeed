@@ -1,143 +1,67 @@
-# Manual E2E Testing Guide for Video Speed Controller
+# Cross-browser Manual Smoke Test
 
-Since automated E2E testing requires a GUI environment that may not be available in all systems, here's a manual testing guide to verify the extension works correctly.
+Run this checklist before distributing either browser package and before promoting a Firefox beta to a public AMO listing.
 
-## Prerequisites
+## Build and load
 
-1. Chrome browser installed
-2. Extension loaded in developer mode
+```sh
+npm ci
+npm run build:all
+```
 
-## Loading the Extension
+### Chrome
 
-1. Open Chrome
-2. Go to `chrome://extensions/`
-3. Enable "Developer mode" (toggle in top right)
-4. Click "Load unpacked"
-5. Select the videospeed project directory
-6. Verify the extension appears in the list
+1. Open `chrome://extensions/` and enable developer mode.
+2. Choose **Load unpacked** and select `dist/chrome/`.
+3. Confirm the extension is named **Video Speed Controller**.
 
-## Test Cases
+### Firefox Stable and ESR
 
-### 1. Basic Functionality Test
+Repeat the Firefox checklist in both the current Stable and ESR releases.
 
-**URL:** https://www.youtube.com/watch?v=gGCJOTvECVQ
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Choose **Load Temporary Add-on** and select `dist/firefox/manifest.json`.
+3. Confirm the extension is named **Video Speed Controller — Community**.
+4. Open the popup and options page and confirm both render without errors.
 
-**Steps:**
-1. Navigate to the YouTube URL
-2. Wait for video to load
-3. Look for the Video Speed Controller overlay (small speed indicator)
-4. Verify the controller shows "1.00" initially
+## Core behavior
 
-**Expected Results:**
-- ✅ Speed controller appears over the video
-- ✅ Shows current speed (1.00x)
-- ✅ Controller has +, -, reset, and other buttons
+Use `tests/e2e/test-video.html`, YouTube, TikTok, and Amazon Prime for the following checks:
 
-### 2. Speed Control Test
+1. Start playback and confirm the controller appears at `1.00`.
+2. Use the controller buttons and the `D`, `S`, `R`, `Z`, `X`, and `V` shortcuts.
+3. Confirm speed, seeking, reset, and controller hide/show behavior all match the configured values.
+4. Change an option, reload the page, and confirm the setting persists.
+5. Disable the extension from the popup and confirm the active controller is removed.
+6. Re-enable it, reload, and confirm the controller returns.
+7. Inspect the page and extension consoles for bridge, storage, or background errors.
 
-**Steps:**
-1. Click the "+" (faster) button
-2. Observe speed changes to ~1.10
-3. Click the "-" (slower) button  
-4. Observe speed changes to ~1.00
-5. Click faster multiple times
-6. Click the reset button
+## Site matrix
 
-**Expected Results:**
-- ✅ Video speed increases with "+"
-- ✅ Video speed decreases with "-"
-- ✅ Speed display updates accordingly
-- ✅ Reset button returns to 1.00x
-- ✅ Video playback actually speeds up/slows down
+### YouTube
 
-### 3. Keyboard Shortcuts Test
+- Controller autohide follows the player controls.
+- Seeking, quality changes, fullscreen, and navigation to another video preserve correct behavior.
 
-**Steps:**
-1. Focus on the video (click on it)
-2. Press 'D' key (faster)
-3. Press 'S' key (slower)
-4. Press 'R' key (reset)
-5. Press 'Z' key (rewind)
-6. Press 'X' key (advance)
+### TikTok
 
-**Expected Results:**
-- ✅ 'D' increases speed
-- ✅ 'S' decreases speed  
-- ✅ 'R' resets to 1.00x
-- ✅ 'Z' rewinds video by ~10 seconds
-- ✅ 'X' advances video by ~10 seconds
+- Controllers do not duplicate as videos are mounted and recycled.
+- Scrolling between videos adopts the active media and preserves the selected speed.
 
-### 4. YouTube Integration Test
+### Amazon Prime Video
 
-**Steps:**
-1. Pause/play the video using YouTube controls
-2. Seek to different positions in the video
-3. Change quality settings
-4. Verify speed controller remains functional
+- Playback starts with both the controller visible and hidden.
+- Toggling the controller with `V` does not create a black video surface.
+- Seeking, fullscreen, subtitles, and episode transitions remain usable.
 
-**Expected Results:**
-- ✅ Speed settings persist through pause/play
-- ✅ Speed settings persist through seeking
-- ✅ Controller remains visible and functional
-- ✅ Speed changes affect actual playback rate
+## Result record
 
-### 5. Settings Persistence Test
+Record the browser version and mark every row as PASS, PARTIAL, or FAIL:
 
-**Steps:**
-1. Set video speed to 1.5x
-2. Navigate to another YouTube video
-3. Check if speed setting is remembered (depends on settings)
+| Browser        | Generic fixture | YouTube | TikTok | Amazon Prime | Popup/options | Notes |
+| -------------- | --------------- | ------- | ------ | ------------ | ------------- | ----- |
+| Chrome Stable  |                 |         |        |              |               |       |
+| Firefox Stable |                 |         |        |              |               |       |
+| Firefox ESR    |                 |         |        |              |               |       |
 
-**Expected Results:**
-- ✅ Speed may reset to 1.0x or remember 1.5x (based on extension settings)
-- ✅ Controller appears on new video
-- ✅ All functionality works on new video
-
-### 6. Cross-Site Test
-
-**Test URLs:**
-- https://vimeo.com/90509568
-- https://developer.mozilla.org/en-US/docs/Web/HTML/Element/video (scroll to examples)
-
-**Steps:**
-1. Navigate to different video sites
-2. Verify controller appears
-3. Test speed controls
-
-**Expected Results:**
-- ✅ Controller works on multiple video sites
-- ✅ All functionality is consistent across sites
-
-## Troubleshooting
-
-### Controller Not Appearing
-- Check if extension is enabled in chrome://extensions/
-- Refresh the page
-- Check browser console for errors (F12 → Console)
-
-### Speed Not Changing
-- Verify video is playing (not paused)
-- Check if site has custom video controls that interfere
-- Try keyboard shortcuts instead of buttons
-
-### Performance Issues
-- Lower video quality if needed
-- Close other tabs to free up resources
-
-## Reporting Results
-
-For each test case, note:
-- ✅ PASS: Feature works as expected
-- ⚠️ PARTIAL: Feature works but with issues
-- ❌ FAIL: Feature doesn't work
-- 🔍 NOTES: Any additional observations
-
-## Expected Final Result
-
-All test cases should pass, confirming:
-1. Extension loads correctly
-2. Video detection works
-3. Speed controls function properly
-4. Keyboard shortcuts work
-5. Settings persist appropriately
-6. Cross-site compatibility
+Do not promote the Firefox beta while the settings handshake times out, the controller fails to attach, storage changes do not cross the bridge, disabling does not tear down the controller, or Amazon Prime shows the reported black-screen regression.

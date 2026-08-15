@@ -2,12 +2,7 @@
  * E2E coverage for the V-key visibility override and automatic autohide.
  */
 
-import { launchChromeWithExtension, waitForController } from './e2e-utils.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getFixtureUrl, launchChromeWithExtension, waitForController } from './e2e-utils.js';
 
 async function getControllerState(page) {
   return page.evaluate(() => {
@@ -259,7 +254,7 @@ async function testDisplayToggle() {
   const { browser, page } = await launchChromeWithExtension();
 
   try {
-    const testPagePath = `file://${path.join(__dirname, 'test-video.html')}`;
+    const testPagePath = getFixtureUrl('test-video.html');
     await page.goto(testPagePath, { waitUntil: 'networkidle2' });
 
     const found = await waitForController(page, 15000);
@@ -388,7 +383,7 @@ async function testDisplayToggle() {
     );
 
     // Broadcast actions must sample and transition each controller independently.
-    const dualVideoPath = `file://${path.join(__dirname, 'dual-video.html')}`;
+    const dualVideoPath = getFixtureUrl('dual-video.html');
     await page.goto(dualVideoPath, { waitUntil: 'networkidle2' });
     await page.waitForFunction(
       () => ['videoA', 'videoB'].every((id) => document.getElementById(id)?.vsc?.div?.shadowRoot),

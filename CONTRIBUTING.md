@@ -84,7 +84,10 @@ a POSIX shell. Windows users need:
    npm run build
    ```
 
-10. Click `Load unpacked` and select the `dist/` folder (the build output).
+10. Click `Load unpacked` and select the `dist/chrome/` folder (the Chrome build output).
+
+    For Firefox, run `npm run build:firefox`, open `about:debugging#/runtime/this-firefox`,
+    choose `Load Temporary Add-on`, and select `dist/firefox/manifest.json`.
 
 11. Try out your changes, make sure they work as expected
 

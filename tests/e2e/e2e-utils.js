@@ -1,13 +1,30 @@
 /**
- * E2E test utilities for Chrome extension testing
+ * Cross-browser E2E test utilities for extension testing
  */
 
 import puppeteer from 'puppeteer';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync, mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const FIREFOX_EXTENSION_ID = 'videospeed@but-a-thought.github';
+const FIREFOX_EXTENSION_UUID = '6f7b8f15-2a90-4bcc-bf20-88805fe073fe';
+
+function findFirefoxExecutable() {
+  if (process.env.FIREFOX_BIN) {
+    return process.env.FIREFOX_BIN;
+  }
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+      'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
+    ];
+    return candidates.find((candidate) => existsSync(candidate));
+  }
+  return undefined;
+}
 
 /**
  * Sleep/wait utility to replace deprecated page.waitForTimeout
@@ -16,36 +33,72 @@ const __dirname = dirname(__filename);
  */
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export function getFixtureUrl(fileName) {
+  if (!process.env.VSC_FIXTURE_ORIGIN) {
+    throw new Error('The E2E fixture server has not been started. Use tests/e2e/run-e2e.js.');
+  }
+  return new URL(fileName, `${process.env.VSC_FIXTURE_ORIGIN}/`).href;
+}
+
 /**
- * Launch Chrome with extension loaded
- * @returns {Promise<{browser: Browser, page: Page}>}
+ * Launch Chrome or Firefox with the matching built extension loaded.
+ * @param {'chrome'|'firefox'} browserName
+ * @returns {Promise<{browser: Browser, page: Page, browserName: string, extensionOrigin: string}>}
  */
-export async function launchChromeWithExtension() {
-  const extensionPath = join(__dirname, '../../dist');
+export async function launchBrowserWithExtension(
+  browserName = process.env.VSC_BROWSER || 'chrome'
+) {
+  if (!['chrome', 'firefox'].includes(browserName)) {
+    throw new Error(`Unsupported E2E browser: ${browserName}`);
+  }
+
+  const extensionPath = join(__dirname, `../../dist/${browserName}`);
 
   console.log(`   📁 Loading extension from: ${extensionPath}`);
 
   try {
-    const browser = await puppeteer.launch({
-      headless: false, // Extensions require non-headless mode
+    const commonOptions = {
+      headless: process.env.VSC_HEADLESS === '1',
       devtools: false,
-      args: [
-        // Containerized/root CI environments (no user namespace) need the
-        // sandbox disabled; opt in explicitly, never by default.
-        ...(process.env.CHROME_NO_SANDBOX ? ['--no-sandbox'] : []),
-        `--load-extension=${extensionPath}`,
-        `--disable-extensions-except=${extensionPath}`,
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--window-size=1280,720',
-        '--allow-file-access-from-files',
-      ],
-      ignoreDefaultArgs: ['--disable-extensions', '--enable-automation'],
-    });
+    };
+    const browser = await puppeteer.launch(
+      browserName === 'firefox'
+        ? {
+            ...commonOptions,
+            browser: 'firefox',
+            protocol: 'webDriverBiDi',
+            executablePath: findFirefoxExecutable(),
+            extraPrefsFirefox: {
+              'extensions.webextensions.uuids': JSON.stringify({
+                [FIREFOX_EXTENSION_ID]: FIREFOX_EXTENSION_UUID,
+              }),
+            },
+          }
+        : {
+            ...commonOptions,
+            browser: 'chrome',
+            args: [
+              // Containerized/root CI environments (no user namespace) need the
+              // sandbox disabled; opt in explicitly, never by default.
+              ...(process.env.CHROME_NO_SANDBOX ? ['--no-sandbox'] : []),
+              `--load-extension=${extensionPath}`,
+              `--disable-extensions-except=${extensionPath}`,
+              '--disable-dev-shm-usage',
+              '--disable-gpu',
+              '--disable-features=TranslateUI',
+              '--disable-ipc-flooding-protection',
+              '--window-size=1280,720',
+              '--allow-file-access-from-files',
+            ],
+            ignoreDefaultArgs: ['--disable-extensions', '--enable-automation'],
+          }
+    );
 
-    console.log('   🌐 Chrome browser launched successfully');
+    if (browserName === 'firefox') {
+      await browser.installExtension(extensionPath);
+    }
+
+    console.log(`   🌐 ${browserName} browser launched successfully`);
 
     const pages = await browser.pages();
     const page = pages[0] || (await browser.newPage());
@@ -71,8 +124,8 @@ export async function launchChromeWithExtension() {
     const userAgent = await page.evaluate(() => navigator.userAgent);
     console.log(`   🔍 User Agent: ${userAgent}`);
 
-    // Check if extension is loaded by navigating to chrome://extensions/
-    try {
+    if (browserName === 'chrome') {
+      // Check if extension is loaded by navigating to chrome://extensions/
       await page.goto('chrome://extensions/', { waitUntil: 'domcontentloaded', timeout: 10000 });
       await sleep(2000);
 
@@ -92,19 +145,32 @@ export async function launchChromeWithExtension() {
       if (extensionInfo.names.length > 0) {
         console.log(`   📦 Extension names: ${extensionInfo.names.join(', ')}`);
       }
-    } catch (error) {
-      console.log(`   ⚠️  Could not check extensions page: ${error.message}`);
+    }
+
+    let extensionOrigin;
+    if (browserName === 'firefox') {
+      extensionOrigin = `moz-extension://${FIREFOX_EXTENSION_UUID}`;
+    } else {
+      const extensionTarget = await browser.waitForTarget(
+        (target) => target.url().startsWith('chrome-extension://'),
+        { timeout: 15000 }
+      );
+      const extensionUrl = new URL(extensionTarget.url());
+      extensionOrigin = `${extensionUrl.protocol}//${extensionUrl.host}`;
     }
 
     // Store console errors on the page object for access
     page.getConsoleErrors = () => consoleErrors;
 
-    return { browser, page };
+    return { browser, page, browserName, extensionOrigin };
   } catch (error) {
-    console.log(`   ❌ Failed to launch Chrome: ${error.message}`);
+    console.log(`   ❌ Failed to launch ${browserName}: ${error.message}`);
     throw error;
   }
 }
+
+// Backward-compatible alias for older standalone test imports.
+export const launchChromeWithExtension = launchBrowserWithExtension;
 
 /**
  * Wait for extension to be loaded and content script to be injected
@@ -225,24 +291,12 @@ export async function waitForVideo(page, selector = 'video', timeout = 15000) {
  */
 export async function waitForController(page, timeout = 10000) {
   try {
-    // Wait for the controller wrapper
-    await page.waitForSelector('.vsc-controller', { timeout });
-
-    // Also check if the shadow DOM content is available
-    const hasController = await page.evaluate(() => {
-      const controller = document.querySelector('.vsc-controller');
-      return (
-        controller && controller.shadowRoot && controller.shadowRoot.querySelector('#controller')
-      );
-    });
-
-    if (hasController) {
-      console.log('   🎛️  Video speed controller found');
-      return true;
-    } else {
-      console.log('   ⚠️  Controller found but shadow DOM not ready');
-      return false;
-    }
+    await page.waitForFunction(
+      () => document.querySelector('.vsc-controller')?.shadowRoot?.querySelector('#controller'),
+      { timeout }
+    );
+    console.log('   🎛️  Video speed controller found');
+    return true;
   } catch {
     console.log(`   ⚠️  Video speed controller not found within ${timeout}ms`);
     return false;
@@ -360,6 +414,7 @@ export async function getControllerSpeedDisplay(page) {
 export async function takeScreenshot(page, filename) {
   try {
     const screenshotPath = join(__dirname, `screenshots/${filename}`);
+    mkdirSync(dirname(screenshotPath), { recursive: true });
     await page.screenshot({ path: screenshotPath, fullPage: true });
     console.log(`   📸 Screenshot saved: ${screenshotPath}`);
   } catch (error) {

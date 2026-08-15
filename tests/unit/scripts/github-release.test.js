@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
@@ -5,10 +7,12 @@ import { ZipArchive } from 'archiver';
 import {
   findSuccessfulCiRun,
   inspectReleaseZip,
+  inspectSourceZip,
   parseGitHubRepo,
   parseRemoteTagRefs,
   prepareReleaseNotes,
 } from '../../../scripts/github-release.js';
+import { RELEASE_FILES } from '../../../scripts/release-config.mjs';
 
 const temporaryDirectories = [];
 
@@ -30,6 +34,14 @@ async function createZip(entries) {
   await archive.finalize();
   await done;
   return zipPath;
+}
+
+function releaseEntries(manifest, extraEntries = {}) {
+  return {
+    ...Object.fromEntries(RELEASE_FILES.map((name) => [name, 'fixture'])),
+    'manifest.json': JSON.stringify(manifest),
+    ...extraEntries,
+  };
 }
 
 afterEach(async () => {
@@ -94,10 +106,7 @@ describe('GitHub release helpers', () => {
   });
 
   it('validates the embedded manifest version and release contents', async () => {
-    const zipPath = await createZip({
-      'manifest.json': JSON.stringify({ version: '0.11.0' }),
-      'inject.js': 'console.log("release");',
-    });
+    const zipPath = await createZip(releaseEntries({ version: '0.11.0' }));
 
     const result = inspectReleaseZip(zipPath, '0.11.0');
     expect(result.manifest.version).toBe('0.11.0');
@@ -106,13 +115,10 @@ describe('GitHub release helpers', () => {
   });
 
   it('rejects wrong-version archives and source maps', async () => {
-    const wrongVersion = await createZip({
-      'manifest.json': JSON.stringify({ version: '0.10.2' }),
-    });
-    const sourceMap = await createZip({
-      'manifest.json': JSON.stringify({ version: '0.11.0' }),
-      'inject.js.map': '{}',
-    });
+    const wrongVersion = await createZip(releaseEntries({ version: '0.10.2' }));
+    const sourceMap = await createZip(
+      releaseEntries({ version: '0.11.0' }, { 'inject.js.map': '{}' })
+    );
 
     expect(() => inspectReleaseZip(wrongVersion, '0.11.0')).toThrow(
       'manifest version is 0.10.2, expected 0.11.0'
@@ -120,5 +126,58 @@ describe('GitHub release helpers', () => {
     expect(() => inspectReleaseZip(sourceMap, '0.11.0')).toThrow(
       'source maps must not be published'
     );
+  });
+
+  it('rejects unexpected release files', async () => {
+    const zipPath = await createZip(
+      releaseEntries({ version: '0.11.0' }, { 'unexpected.txt': 'nope' })
+    );
+
+    expect(() => inspectReleaseZip(zipPath, '0.11.0')).toThrow(
+      'unexpected files are present: unexpected.txt'
+    );
+  });
+
+  it('validates browser-specific release manifests', async () => {
+    const chromeZip = await createZip(
+      releaseEntries({
+        version: '0.11.0',
+        background: { service_worker: 'background.js' },
+      })
+    );
+    const firefoxZip = await createZip(
+      releaseEntries({
+        version: '0.11.0',
+        background: { scripts: ['background.js'] },
+        browser_specific_settings: {
+          gecko: { id: 'videospeed@but-a-thought.github' },
+        },
+      })
+    );
+
+    expect(inspectReleaseZip(chromeZip, '0.11.0', 'chrome').manifest.background).toEqual({
+      service_worker: 'background.js',
+    });
+    expect(inspectReleaseZip(firefoxZip, '0.11.0', 'firefox').manifest.background).toEqual({
+      scripts: ['background.js'],
+    });
+  });
+
+  it('validates the reproducible AMO reviewer source archive', async () => {
+    const sourceZip = await createZip({
+      'package.json': JSON.stringify({ version: '0.11.0' }),
+      'package-lock.json': '{}',
+      'manifest.json': '{}',
+      'scripts/build-config.mjs': 'export {};',
+      'scripts/build.mjs': 'export {};',
+      'scripts/release-config.mjs': 'export {};',
+      'src/entries/content-bridge.js': 'export {};',
+      'docs/firefox-reviewer-build.md': '# Firefox reviewer build',
+      'docs/release.md': '# Release',
+    });
+
+    const result = inspectSourceZip(sourceZip, '0.11.0');
+    expect(result.entries).toContain('src/entries/content-bridge.js');
+    expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 });

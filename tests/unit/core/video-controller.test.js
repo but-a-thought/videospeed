@@ -232,6 +232,52 @@ describe('VideoController', () => {
     }
   });
 
+  it('repairs a rediscovered controller on a generic site without a proactive observer', async () => {
+    const manager = window.VSC.siteHandlerManager;
+    const previousHandler = manager.currentHandler;
+    manager.currentHandler = new window.VSC.BaseSiteHandler();
+
+    try {
+      const config = window.VSC.videoSpeedConfig;
+      await config.load();
+      vi.useFakeTimers();
+      const eventManager = new window.VSC.EventManager(config, null);
+      const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+      const firstContainer = document.createElement('div');
+      const video = createMockVideo();
+      firstContainer.appendChild(video);
+      mockDOM.container.appendChild(firstContainer);
+      const controller = new window.VSC.VideoController(
+        video,
+        firstContainer,
+        config,
+        actionHandler
+      );
+      video.playbackRate = 1.75;
+
+      expect(controller.div.parentNode).toBe(firstContainer);
+      expect(controller.controllerPlacementObserver).toBeUndefined();
+
+      firstContainer.replaceChildren();
+      const secondContainer = document.createElement('div');
+      mockDOM.container.appendChild(secondContainer);
+      secondContainer.appendChild(video);
+
+      controller.ensureAttached();
+      await vi.runAllTimersAsync();
+
+      expect(controller.div.parentNode).toBe(secondContainer);
+      expect(controller.parent).toBe(secondContainer);
+      expect(video.vsc).toBe(controller);
+      expect(video.playbackRate).toBe(1.75);
+      expect(document.querySelectorAll('vsc-controller')).toHaveLength(1);
+      expect(controller.controllerPlacementObserver).toBeUndefined();
+    } finally {
+      manager.currentHandler = previousHandler;
+      vi.useRealTimers();
+    }
+  });
+
   it('restores TikTok speed after the volume-control event settles', async () => {
     const manager = window.VSC.siteHandlerManager;
     const previousHandler = manager.currentHandler;

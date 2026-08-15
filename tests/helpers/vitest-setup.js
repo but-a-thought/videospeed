@@ -34,7 +34,7 @@ if (typeof globalThis.requestIdleCallback === 'undefined') {
 
 // Enhanced shadow DOM support for jsdom
 // jsdom doesn't support attachShadow — we mock it with a div-based approach
-if (!HTMLElement.prototype._originalAttachShadow) {
+if (typeof HTMLElement !== 'undefined' && !HTMLElement.prototype._originalAttachShadow) {
   const orig = HTMLElement.prototype.attachShadow;
   const needsPolyfill = (() => {
     try {
@@ -74,9 +74,11 @@ if (!HTMLElement.prototype._originalAttachShadow) {
 // Load ALL extension modules once for the entire test run.
 // This includes loadCoreModules + inject.js — the superset.
 // Individual test files no longer need to call loadCoreModules/loadInjectModules.
-beforeAll(async () => {
-  await loadInjectModules();
-});
+if (typeof window !== 'undefined') {
+  beforeAll(async () => {
+    await loadInjectModules();
+  });
+}
 
 // Reset mock storage between tests for isolation
 beforeEach(() => {

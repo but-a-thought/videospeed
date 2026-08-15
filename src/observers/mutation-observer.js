@@ -29,7 +29,7 @@ class VideoMutationObserver {
     });
 
     const observerOptions = {
-      attributeFilter: ['aria-hidden', 'data-focus-method', 'style', 'class'],
+      attributeFilter: ['aria-hidden', 'data-focus-method', 'style', 'class', 'controls'],
       childList: true,
       subtree: true,
     };
@@ -87,6 +87,16 @@ class VideoMutationObserver {
       }
       this.checkForVideoAndShadowRoot(node, node.parentNode || mutation.target, false);
     });
+
+    // Pair roles are normally refreshed during media discovery. Re-evaluate a
+    // live Hover Zoom viewer here as well so adding or removing an ambiguous
+    // extra media element takes effect before that element becomes playable.
+    const viewer = mutation.target.closest?.('#hzViewer');
+    if (viewer) {
+      const controlledMedia = window.VSC.stateManager?.getControlledElements() || [];
+      const member = controlledMedia.find((media) => media.closest?.('#hzViewer') === viewer);
+      member?.vsc?.refreshSynchronizedMediaState();
+    }
   }
 
   /**
@@ -95,6 +105,16 @@ class VideoMutationObserver {
    * @private
    */
   processAttributeMutation(mutation) {
+    // A media element can transition from a decorative preview to an
+    // interactive player without being replaced. Re-evaluate it when native
+    // controls are enabled or disabled.
+    if (
+      mutation.attributeName === 'controls' &&
+      (mutation.target.tagName === 'VIDEO' || mutation.target.tagName === 'AUDIO')
+    ) {
+      this.recheckVideoElement(mutation.target);
+    }
+
     // Handle style and class changes that might affect video visibility
     if (mutation.attributeName === 'style' || mutation.attributeName === 'class') {
       this.handleVisibilityChanges(mutation.target);
@@ -255,7 +275,7 @@ class VideoMutationObserver {
     });
 
     const observerOptions = {
-      attributeFilter: ['aria-hidden', 'data-focus-method'],
+      attributeFilter: ['aria-hidden', 'data-focus-method', 'controls'],
       childList: true,
       subtree: true,
     };

@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hover Zoom compatibility fixture</title>
+    <style>
+      #hzViewer {
+        position: fixed;
+        inset: 80px auto auto 80px;
+        z-index: 2147483647;
+        padding: 5px;
+        overflow: hidden;
+      }
+
+      #hzContainer {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      video {
+        width: 640px;
+        height: 360px;
+        background: black;
+      }
+
+      audio {
+        display: none;
+      }
+
+      #ordinary-gif {
+        position: absolute;
+        top: 500px;
+        width: 160px;
+        height: 90px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Hover Zoom compatibility fixture</h1>
+    <script>
+      const createGifLikeVideo = (id) => {
+        const video = document.createElement('video');
+        video.id = id;
+        video.loop = true;
+        video.muted = true;
+        video.controls = false;
+        video.src = 'fixtures/test.wav';
+        return video;
+      };
+
+      const viewer = document.createElement('div');
+      viewer.id = 'hzViewer';
+      const container = document.createElement('div');
+      container.id = 'hzContainer';
+      const video = createGifLikeVideo('hoverzoom-video');
+      const audio = document.createElement('audio');
+      audio.id = 'hoverzoom-audio';
+      audio.src = 'fixtures/test.wav';
+      container.append(video, audio);
+      viewer.appendChild(container);
+      document.body.appendChild(viewer);
+
+      const ordinaryGif = createGifLikeVideo('ordinary-gif');
+      document.body.appendChild(ordinaryGif);
+
+      window.hoverZoomFixture = {
+        viewer,
+        container,
+        video,
+        audio,
+        locked: false,
+        controller: null,
+        controllerNode: null,
+        audioController: null,
+        audioControllerNode: null,
+        rememberController() {
+          this.controller = this.video.vsc;
+          this.controllerNode = this.video.vsc?.div;
+          this.audioController = this.audio.vsc;
+          this.audioControllerNode = this.audio.vsc?.div;
+        },
+        lock() {
+          // Hover Zoom synchronously empties its viewer, creates a replacement
+          // #hzContainer, and moves the same video into it.
+          this.viewer.replaceChildren();
+          const nextContainer = document.createElement('div');
+          nextContainer.id = 'hzContainer';
+          this.viewer.appendChild(nextContainer);
+          nextContainer.appendChild(this.video);
+          nextContainer.appendChild(this.audio);
+          this.video.controls = true;
+          this.audio.controls = true;
+          this.container = nextContainer;
+          this.locked = true;
+        },
+        removeViewer() {
+          this.viewer.remove();
+        },
+      };
+
+      video.load();
+      audio.load();
+      ordinaryGif.load();
+    </script>
+  </body>
+</html>

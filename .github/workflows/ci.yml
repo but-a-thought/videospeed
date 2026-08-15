@@ -36,6 +36,9 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run lint
       - run: npm run build:release
+      - run: npm run validate:builds
+        env:
+          NO_UPDATE_NOTIFIER: '1'
       - run: npm test
       - run: npm run test:tlc
       - run: node scripts/package-release.js
@@ -46,3 +49,26 @@ jobs:
           name: videospeed-release-node-${{ matrix.node-version }}
           path: release/videospeed-*.zip
           retention-days: 7
+
+  browser-smoke:
+    name: ${{ matrix.browser }} extension smoke test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: '1'
+      - run: npx puppeteer browsers install ${{ matrix.browser }}
+      - run: npm run build:${{ matrix.browser }}
+      - run: node tests/e2e/run-e2e.js --browser=${{ matrix.browser }} --headless
+        env:
+          CHROME_NO_SANDBOX: '1'

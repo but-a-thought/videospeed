@@ -111,6 +111,45 @@ class SiteHandlerManager {
   }
 
   /**
+   * Return Hover Zoom's split video/audio playback pair when the viewer is
+   * unambiguous. Reddit DASH previews use one element for pictures and one for
+   * sound; speed commands must treat them as one logical player.
+   *
+   * Nested viewers are excluded by checking each media element's closest
+   * #hzViewer. Pairing also fails closed while the viewer is detached or when
+   * either media type appears more than once.
+   *
+   * @param {HTMLMediaElement} media - Candidate media element
+   * @returns {{viewer: HTMLElement, primary: HTMLVideoElement, secondary: HTMLAudioElement, media: HTMLMediaElement[]}|null}
+   */
+  getSynchronizedMediaGroup(media) {
+    if (!media || (media.tagName !== 'VIDEO' && media.tagName !== 'AUDIO')) {
+      return null;
+    }
+
+    const viewer = media.closest?.('#hzViewer');
+    if (!viewer?.isConnected) {
+      return null;
+    }
+
+    const inThisViewer = (candidate) => candidate.closest?.('#hzViewer') === viewer;
+    const videos = Array.from(viewer.querySelectorAll('video')).filter(inThisViewer);
+    const audios = Array.from(viewer.querySelectorAll('audio')).filter(inThisViewer);
+
+    if (videos.length !== 1 || audios.length !== 1) {
+      return null;
+    }
+
+    const primary = videos[0];
+    const secondary = audios[0];
+    if (media !== primary && media !== secondary) {
+      return null;
+    }
+
+    return { viewer, primary, secondary, media: [primary, secondary] };
+  }
+
+  /**
    * Check if a video should be ignored
    * @param {HTMLMediaElement} video - Video element
    * @returns {boolean} True if video should be ignored
@@ -124,8 +163,16 @@ class SiteHandlerManager {
     // Detect gif-like videos: muted looping videos with no native controls.
     // Sites like Telegram, X, Imgur serve animated stickers/GIFs as <video
     // autoplay loop muted> elements. Showing a speed overlay on these is
-    // visually noisy and not useful.
-    if (video.tagName === 'VIDEO' && video.loop && video.muted && !video.controls) {
+    // visually noisy and not useful. Hover Zoom uses the same media signature
+    // for an explicitly interactive preview, so keep that viewer controllable.
+    const isHoverZoomVideo = video.tagName === 'VIDEO' && Boolean(video.closest?.('#hzViewer'));
+    if (
+      video.tagName === 'VIDEO' &&
+      video.loop &&
+      video.muted &&
+      !video.controls &&
+      !isHoverZoomVideo
+    ) {
       window.VSC.logger.debug('Video ignored: gif-video pattern (loop + muted + no controls)');
       return true;
     }

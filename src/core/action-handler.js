@@ -16,10 +16,12 @@ class ActionHandler {
    * one user command. A bulk keyboard/popup action starts one authority epoch,
    * not one epoch per target, while each target still receives its local
    * USER_SET transition.
-   * @returns {{hasClaimedAuthority: boolean}}
+   * Paired media are marked processed so relative commands are calculated and
+   * applied once even though bulk actions iterate every registered element.
+   * @returns {{hasClaimedAuthority: boolean, processedMedia: Set<HTMLMediaElement>}}
    */
   createAuthorityBatch() {
-    return { hasClaimedAuthority: false };
+    return { hasClaimedAuthority: false, processedMedia: new Set() };
   }
 
   /**
@@ -42,6 +44,10 @@ class ActionHandler {
 
     const authorityBatch = this.createAuthorityBatch();
     mediaTags.forEach((v) => {
+      if (authorityBatch.processedMedia.has(v)) {
+        return;
+      }
+
       const controller = v.vsc?.div;
 
       if (!controller) {
@@ -66,7 +72,7 @@ class ActionHandler {
    * @param {*} value - Action value
    * @param {HTMLMediaElement} video - Video element
    * @param {Event} e - Event object (optional)
-   * @param {{authorityBatch?: {hasClaimedAuthority: boolean}}} [options]
+   * @param {{authorityBatch?: {hasClaimedAuthority: boolean, processedMedia: Set<HTMLMediaElement>}}} [options]
    * @private
    */
   executeAction(action, value, video, e, options = {}) {
@@ -264,7 +270,7 @@ class ActionHandler {
    * @param {HTMLMediaElement} video - Video element
    * @param {number} target - Target speed for this action
    * @param {number} [crossTarget] - Target speed of the paired action (for cross-toggle)
-   * @param {{authorityBatch?: {hasClaimedAuthority: boolean}}} [options]
+   * @param {{authorityBatch?: {hasClaimedAuthority: boolean, processedMedia: Set<HTMLMediaElement>}}} [options]
    */
   resetSpeed(video, target, crossTarget, options = {}) {
     if (!video.vsc) {
@@ -272,31 +278,44 @@ class ActionHandler {
       return;
     }
 
-    const currentSpeed = video.playbackRate;
+    const authorityBatch = options.authorityBatch || this.createAuthorityBatch();
+    const group = this.getSpeedMediaGroup(video);
+    if (group.media.some((media) => authorityBatch.processedMedia.has(media))) {
+      return;
+    }
+
+    const source = group.primary;
+    const currentSpeed = source.playbackRate;
+    const setResetMemory = (speed) => {
+      group.media.forEach((media) => {
+        media.vsc.speedBeforeReset = speed;
+      });
+    };
+    const adjustOptions = { ...options, authorityBatch };
 
     if (currentSpeed === target) {
-      if (video.vsc.speedBeforeReset !== null) {
+      if (source.vsc.speedBeforeReset !== null) {
         // Restore remembered speed
-        window.VSC.logger.info(`Restoring remembered speed: ${video.vsc.speedBeforeReset}`);
-        const rememberedSpeed = video.vsc.speedBeforeReset;
-        video.vsc.speedBeforeReset = null;
-        this.adjustSpeed(video, rememberedSpeed, options);
+        window.VSC.logger.info(`Restoring remembered speed: ${source.vsc.speedBeforeReset}`);
+        const rememberedSpeed = source.vsc.speedBeforeReset;
+        setResetMemory(null);
+        this.adjustSpeed(source, rememberedSpeed, adjustOptions);
       } else if (crossTarget && crossTarget !== target) {
         // Cross-toggle: jump to the paired action's target
         window.VSC.logger.info(`Cross-toggle from ${target} to ${crossTarget}`);
-        video.vsc.speedBeforeReset = currentSpeed;
-        this.adjustSpeed(video, crossTarget, options);
+        setResetMemory(currentSpeed);
+        this.adjustSpeed(source, crossTarget, adjustOptions);
       } else {
         // Even an already-normal reset is an explicit VSC choice. Route it
         // through USER_SET so a same-value action starts a fresh authority
         // epoch and retries any locally suppressed media on the next lifecycle.
-        this.adjustSpeed(video, target, options);
+        this.adjustSpeed(source, target, adjustOptions);
       }
     } else {
       // Remember current speed and jump to target
       window.VSC.logger.info(`Remembering speed ${currentSpeed} and resetting to ${target}`);
-      video.vsc.speedBeforeReset = currentSpeed;
-      this.adjustSpeed(video, target, options);
+      setResetMemory(currentSpeed);
+      this.adjustSpeed(source, target, adjustOptions);
     }
   }
 
@@ -444,7 +463,7 @@ class ActionHandler {
    * @param {number} value - Speed value (absolute) or delta (relative)
    * @param {Object} options - Configuration options
    * @param {boolean} options.relative - If true, value is a delta; if false, absolute speed
-   * @param {{hasClaimedAuthority: boolean}} [options.authorityBatch] - Shared batch context for a bulk user command
+   * @param {{hasClaimedAuthority: boolean, processedMedia: Set<HTMLMediaElement>}} [options.authorityBatch] - Shared batch context for a bulk user command
    */
   adjustSpeed(video, value, options = {}) {
     return window.VSC.logger.withContext(video, () => {
@@ -459,17 +478,44 @@ class ActionHandler {
         return;
       }
 
-      return this._adjustSpeedInternal(video, value, options);
+      const authorityBatch = options.authorityBatch || this.createAuthorityBatch();
+      const group = this.getSpeedMediaGroup(video);
+      if (group.media.some((media) => authorityBatch.processedMedia.has(media))) {
+        return;
+      }
+
+      const targetSpeed = this.calculateTargetSpeed(group.primary, value, options.relative);
+      group.media.forEach((media) => authorityBatch.processedMedia.add(media));
+      group.media.forEach((media) => this._applyTargetSpeed(media, targetSpeed, authorityBatch));
     });
   }
 
   /**
-   * Internal adjustSpeed implementation (context already set)
+   * Resolve the logical media player for speed actions. Hover Zoom pairs are
+   * active only after both media elements have VSC state; otherwise the
+   * initiating element remains independent.
+   * @param {HTMLMediaElement} media
+   * @returns {{primary: HTMLMediaElement, media: HTMLMediaElement[]}}
    * @private
    */
-  _adjustSpeedInternal(video, value, options) {
-    const { relative = false, authorityBatch } = options;
+  getSpeedMediaGroup(media) {
+    const group = window.VSC.siteHandlerManager.getSynchronizedMediaGroup(media);
+    if (!group || !group.primary.vsc || !group.secondary.vsc) {
+      return { primary: media, media: [media] };
+    }
+    return group;
+  }
 
+  /**
+   * Calculate and clamp one target speed from the logical player's primary
+   * video. The resulting absolute value is then written to every group member.
+   * @param {HTMLMediaElement} video
+   * @param {number} value
+   * @param {boolean} relative
+   * @returns {number}
+   * @private
+   */
+  calculateTargetSpeed(video, value, relative = false) {
     // Calculate target speed
     let targetSpeed;
     if (relative) {
@@ -500,24 +546,57 @@ class ActionHandler {
     // Round to 2 decimal places to avoid floating point issues
     targetSpeed = Number(targetSpeed.toFixed(2));
 
+    return targetSpeed;
+  }
+
+  /**
+   * Apply one already-resolved user speed to a media register.
+   * @param {HTMLMediaElement} video
+   * @param {number} targetSpeed
+   * @param {{hasClaimedAuthority: boolean, processedMedia: Set<HTMLMediaElement>}} authorityBatch
+   * @private
+   */
+  _applyTargetSpeed(video, targetSpeed, authorityBatch) {
     // USER_SET effect row, in order. A user action claims authority with a
     // clean fight budget (cells 5/12); authority must be current BEFORE the
     // register write, so any handler observing the resulting ratechange
     // reads fresh state.
     if (this.eventManager?.arbitration) {
       this.eventManager.arbitration.noteUserSet(video, targetSpeed, {
-        startsAuthorityEpoch: !authorityBatch || !authorityBatch.hasClaimedAuthority,
+        startsAuthorityEpoch: !authorityBatch.hasClaimedAuthority,
       });
-      if (authorityBatch) {
-        authorityBatch.hasClaimedAuthority = true;
-      }
+      authorityBatch.hasClaimedAuthority = true;
     } else {
       // Standalone construction has no document coordinator; preserve the
       // existing persistence behavior for unit-level/controller-only use.
-      this.config.persistAuthority(targetSpeed);
+      if (!authorityBatch.hasClaimedAuthority) {
+        this.config.persistAuthority(targetSpeed);
+        authorityBatch.hasClaimedAuthority = true;
+      }
     }
     this.writeRate(video, targetSpeed);
     this.syncIndicator(video, targetSpeed);
+  }
+
+  /**
+   * When a Hover Zoom pair first becomes controllable, make its hidden audio
+   * register follow the primary video's current rate without claiming new user
+   * authority or flashing either badge.
+   * @param {HTMLMediaElement} media
+   */
+  synchronizeMediaGroupFromPrimary(media) {
+    const group = this.getSpeedMediaGroup(media);
+    if (group.media.length === 1) {
+      return;
+    }
+
+    const targetSpeed = Number(group.primary.playbackRate.toFixed(2));
+    group.media.forEach((member) => {
+      if (member.playbackRate !== targetSpeed) {
+        this.writeRate(member, targetSpeed);
+      }
+      this.syncIndicator(member, targetSpeed, { flash: false });
+    });
   }
 
   /**
@@ -566,7 +645,7 @@ class ActionHandler {
    * @param {HTMLMediaElement} video - Video element
    * @param {number} rate - Speed to display
    */
-  syncIndicator(video, rate) {
+  syncIndicator(video, rate, { flash = true } = {}) {
     const numericSpeed = Number(rate.toFixed(2));
     const speedIndicator = video.vsc?.speedIndicator;
     if (!speedIndicator) {
@@ -577,7 +656,7 @@ class ActionHandler {
     }
     speedIndicator.textContent = numericSpeed.toFixed(2);
 
-    if (video.vsc?.div) {
+    if (flash && video.vsc?.div) {
       this.flashController(video.vsc.div);
     }
   }

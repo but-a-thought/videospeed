@@ -1,4 +1,5 @@
 // Import necessary modules
+import { vi } from 'vitest';
 import { installChromeMock, cleanupChromeMock } from '../../helpers/chrome-mock.js';
 
 // Load all required modules
@@ -225,5 +226,54 @@ describe('MutationObserver', () => {
     expect(mockOnVideoFound.length).toBe(1);
     expect(mockOnVideoFound[0].video).toBe(videoElement);
     expect(mockOnVideoFound[0].parent).toBe(videoElement.parentNode);
+  });
+
+  it('rechecks a media element when its controls attribute changes', async () => {
+    const mockConfig = { settings: {} };
+    const onVideoFound = vi.fn();
+    const mediaObserver = {
+      isValidMediaElement: vi.fn(() => true),
+    };
+    const observer = new window.VSC.VideoMutationObserver(
+      mockConfig,
+      onVideoFound,
+      vi.fn(),
+      mediaObserver
+    );
+    const video = document.createElement('video');
+    document.body.appendChild(video);
+
+    try {
+      observer.start(document);
+      video.controls = true;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(mediaObserver.isValidMediaElement).toHaveBeenCalledWith(video);
+      expect(onVideoFound).toHaveBeenCalledWith(video, document.body);
+    } finally {
+      observer.stop();
+      video.remove();
+    }
+  });
+
+  it('does not recheck a non-media element with a controls attribute', () => {
+    const mediaObserver = {
+      isValidMediaElement: vi.fn(() => true),
+    };
+    const onVideoFound = vi.fn();
+    const observer = new window.VSC.VideoMutationObserver(
+      { settings: {} },
+      onVideoFound,
+      vi.fn(),
+      mediaObserver
+    );
+
+    observer.processAttributeMutation({
+      attributeName: 'controls',
+      target: document.createElement('div'),
+    });
+
+    expect(mediaObserver.isValidMediaElement).not.toHaveBeenCalled();
+    expect(onVideoFound).not.toHaveBeenCalled();
   });
 });

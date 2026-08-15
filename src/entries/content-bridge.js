@@ -21,8 +21,31 @@ const SPEED_MAX = 16;
 const docEl = document.documentElement;
 let bridgeInitialized = false;
 
+/**
+ * Dispatch an object payload into the page's realm.
+ *
+ * Firefox's Xray boundary does not expose objects created in the isolated
+ * content-script realm directly to MAIN-world listeners. cloneInto is only
+ * available in Firefox content scripts; Chromium can use the original value.
+ * A cloning error must not fall back to the inaccessible object.
+ */
+function dispatchToPage(type, detail) {
+  let pageDetail = detail;
+  if (typeof globalThis.cloneInto === 'function') {
+    try {
+      pageDetail = globalThis.cloneInto(detail, window);
+    } catch (error) {
+      console.error(`[VSC] Failed to clone ${type} payload into page context:`, error);
+      return false;
+    }
+  }
+
+  docEl.dispatchEvent(new CustomEvent(type, { detail: pageDetail }));
+  return true;
+}
+
 function dispatchAbort() {
-  docEl.dispatchEvent(new CustomEvent('VSC_SETTINGS_READY', { detail: { abort: true } }));
+  dispatchToPage('VSC_SETTINGS_READY', { abort: true });
 }
 
 function init() {
@@ -73,14 +96,10 @@ function init() {
         delete publicSettings.blacklist;
         delete publicSettings.enabled;
         bridgeActive = true;
-        docEl.dispatchEvent(
-          new CustomEvent('VSC_SETTINGS_READY', {
-            detail: {
-              settings: publicSettings,
-              hostname: location.hostname.replace(/^www\./, ''),
-            },
-          })
-        );
+        dispatchToPage('VSC_SETTINGS_READY', {
+          settings: publicSettings,
+          hostname: location.hostname.replace(/^www\./, ''),
+        });
       },
       { once: true }
     );
@@ -97,7 +116,7 @@ function init() {
       }
       if (enabledChange?.newValue === false) {
         bridgeActive = false;
-        docEl.dispatchEvent(new CustomEvent('VSC_MESSAGE', { detail: { type: 'VSC_TEARDOWN' } }));
+        dispatchToPage('VSC_MESSAGE', { type: 'VSC_TEARDOWN' });
         return;
       }
       if (!bridgeActive) {
@@ -108,13 +127,13 @@ function init() {
       delete relayChanges.enabled;
       delete relayChanges.blacklist;
       if (Object.keys(relayChanges).length > 0) {
-        docEl.dispatchEvent(new CustomEvent('VSC_STORAGE_CHANGED', { detail: relayChanges }));
+        dispatchToPage('VSC_STORAGE_CHANGED', relayChanges);
       }
     });
 
     chrome.runtime.onMessage.addListener((request) => {
       if (bridgeActive) {
-        docEl.dispatchEvent(new CustomEvent('VSC_MESSAGE', { detail: request }));
+        dispatchToPage('VSC_MESSAGE', request);
       }
     });
 

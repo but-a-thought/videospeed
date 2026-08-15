@@ -49,6 +49,11 @@ class VideoController {
     // Create UI
     this.div = this.initializeControls();
 
+    // A Hover Zoom DASH preview becomes one logical player once both its
+    // video and audio controllers exist. Refresh both wrappers together so
+    // only the primary video badge remains visible.
+    this.refreshSynchronizedMediaState();
+
     // TikTok and similar virtualized players can preserve a media element
     // while reconciling away extension-owned children. Opted-in handlers get
     // a narrow parent observer that repairs the existing controller host.
@@ -157,6 +162,7 @@ class VideoController {
 
     // Apply all classes at once to prevent visible flash
     wrapper.className = cssClasses.join(' ');
+    wrapper.dataset.vscMediaType = this.video.tagName.toLowerCase();
 
     // IMPORTANT: Wrapper gets z-index ONLY — no position, no top, no left.
     // Position is controlled by inject.css (default: absolute; site overrides: relative).
@@ -207,9 +213,19 @@ class VideoController {
     const fragment = document.createDocumentFragment();
     fragment.appendChild(wrapper);
 
+    // Media can be preserved while its surrounding player DOM is rebuilt.
+    // Always resolve placement from the live parent instead of retaining a
+    // container that may already have been detached.
+    const currentParent = this.video.parentElement || this.parent;
+    if (!currentParent) {
+      window.VSC.logger.warn('Cannot insert controller without a media parent');
+      return;
+    }
+    this.parent = currentParent;
+
     // Get site-specific positioning information
     const positioning = window.VSC.siteHandlerManager.getControllerPosition(
-      this.parent,
+      currentParent,
       this.video
     );
 
@@ -234,7 +250,7 @@ class VideoController {
     window.VSC.logger.debug(`Controller inserted using ${positioning.insertionMethod} method`);
   }
 
-  /** Set up repair for sites that recycle player DOM around a live video. @private */
+  /** Set up proactive repair for sites that recycle player DOM around a live video. @private */
   setupControllerPlacementRepair() {
     if (!window.VSC.siteHandlerManager.shouldRepairControllerPlacement()) {
       return;
@@ -256,18 +272,16 @@ class VideoController {
   }
 
   /**
-   * Reinsert a controller that TikTok detached or left in a recycled player.
-   * Safe to call from both mutation callbacks and media rediscovery.
+   * Reinsert a controller detached or stranded by a recycled player.
+   * Explicit media rediscovery is safe for every site; only proactive parent
+   * observation remains gated by shouldRepairControllerPlacement().
    */
   ensureAttached() {
-    if (
-      !window.VSC.siteHandlerManager.shouldRepairControllerPlacement() ||
-      this.video.vsc !== this ||
-      !this.video.isConnected ||
-      !this.div
-    ) {
+    if (this.video.vsc !== this || !this.video.isConnected || !this.div) {
       return;
     }
+
+    this.refreshSynchronizedMediaState();
 
     const placement = window.VSC.siteHandlerManager.getControllerPosition(
       this.video.parentElement || this.parent,
@@ -289,8 +303,9 @@ class VideoController {
       }
       this.insertIntoDOM(this.video.ownerDocument, this.div);
       this.observeControllerParent();
+      this.refreshSynchronizedMediaState();
       this.updateVisibility();
-      window.VSC.logger.info('Reattached controller after player DOM recycling');
+      window.VSC.logger.info('Reattached controller after media DOM recycling');
     }, 0);
   }
 
@@ -387,6 +402,12 @@ class VideoController {
   remove() {
     window.VSC.logger.debug('Removing VideoController');
 
+    const synchronizedViewer =
+      this.video.closest?.('#hzViewer') ||
+      this.parent?.closest?.('#hzViewer') ||
+      this.synchronizedViewer ||
+      null;
+
     // A detached controller must not be retained or mutated by a pending
     // visibility flash callback after its media/controller lifecycle ends.
     if (this.div?.flashTimer !== undefined) {
@@ -455,7 +476,61 @@ class VideoController {
     // Remove reference from video element
     delete this.video.vsc;
 
+    // If one member left a live viewer, immediately clear or rebuild the
+    // remaining controllers' roles from the viewer's current media contents.
+    if (synchronizedViewer) {
+      const remainingMedia = window.VSC.stateManager
+        ?.getControlledElements()
+        .find((media) => media.closest?.('#hzViewer') === synchronizedViewer);
+      remainingMedia?.vsc?.refreshSynchronizedMediaState();
+    }
+
     window.VSC.logger.debug('VideoController removed successfully');
+  }
+
+  /**
+   * Recompute visible/secondary badge roles for one Hover Zoom viewer.
+   * Existing roles are cleared first so ambiguous or broken groups fail open
+   * with normal independent controllers instead of hiding usable controls.
+   */
+  refreshSynchronizedMediaState() {
+    if (!this.div) {
+      return;
+    }
+
+    const currentViewer = this.video.closest?.('#hzViewer') || null;
+    const relevantViewer =
+      currentViewer || this.parent?.closest?.('#hzViewer') || this.synchronizedViewer || null;
+
+    if (!relevantViewer) {
+      delete this.div.dataset.vscSyncRole;
+      this.synchronizedViewer = null;
+      return;
+    }
+
+    const controlledMedia = window.VSC.stateManager?.getControlledElements() || [];
+    controlledMedia.forEach((media) => {
+      const controller = media.vsc;
+      if (
+        controller?.div &&
+        (media.closest?.('#hzViewer') === relevantViewer ||
+          controller.synchronizedViewer === relevantViewer)
+      ) {
+        delete controller.div.dataset.vscSyncRole;
+        controller.synchronizedViewer = null;
+      }
+    });
+
+    const group = window.VSC.siteHandlerManager.getSynchronizedMediaGroup(this.video);
+    if (!group || !group.primary.vsc?.div || !group.secondary.vsc?.div) {
+      return;
+    }
+
+    group.primary.vsc.div.dataset.vscSyncRole = 'primary';
+    group.secondary.vsc.div.dataset.vscSyncRole = 'secondary';
+    group.primary.vsc.synchronizedViewer = group.viewer;
+    group.secondary.vsc.synchronizedViewer = group.viewer;
+    this.actionHandler?.synchronizeMediaGroupFromPrimary(group.primary);
   }
 
   /**
@@ -536,6 +611,8 @@ class VideoController {
    * Called when video visibility changes
    */
   updateVisibility() {
+    this.refreshSynchronizedMediaState();
+
     const isVisible = this.isVideoVisible();
     const isCurrentlyHidden = this.div.classList.contains('vsc-hidden');
 
