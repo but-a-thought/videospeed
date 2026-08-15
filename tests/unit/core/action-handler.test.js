@@ -57,6 +57,38 @@ describe('ActionHandler', () => {
     return mockVideo;
   }
 
+  function createHoverZoomMediaPair(config, actionHandler) {
+    const viewer = document.createElement('div');
+    viewer.id = 'hzViewer';
+    const container = document.createElement('div');
+    container.id = 'hzContainer';
+    const video = createMockVideo({ playbackRate: 1 });
+    const audio = document.createElement('audio');
+    Object.defineProperties(audio, {
+      playbackRate: { value: 1, writable: true, configurable: true },
+      currentTime: { value: 0, writable: true, configurable: true },
+      duration: { value: 100, writable: true, configurable: true },
+      paused: { value: false, writable: true, configurable: true },
+      muted: { value: false, writable: true, configurable: true },
+      volume: { value: 1, writable: true, configurable: true },
+      readyState: { value: 2, writable: true, configurable: true },
+      currentSrc: {
+        value: 'https://example.com/audio.mp3',
+        writable: true,
+        configurable: true,
+      },
+    });
+    audio.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0 });
+
+    container.append(video, audio);
+    viewer.appendChild(container);
+    mockDOM.container.appendChild(viewer);
+    new window.VSC.VideoController(video, container, config, actionHandler);
+    new window.VSC.VideoController(audio, container, config, actionHandler);
+
+    return { viewer, container, video, audio };
+  }
+
   afterEach(() => {
     cleanupChromeMock();
     if (mockDOM) {
@@ -79,6 +111,102 @@ describe('ActionHandler', () => {
     expect(mockVideo.playbackRate).toBe(2.0);
     expect(mockVideo.vsc.speedIndicator.textContent).toBe('2.00');
     expect(config.settings.lastSpeed).toBe(2.0);
+  });
+
+  it('synchronizes a Hover Zoom video/audio pair behind one visible badge', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const { video, audio } = createHoverZoomMediaPair(config, actionHandler);
+    const noteUserSet = vi.spyOn(eventManager.arbitration, 'noteUserSet');
+
+    video.playbackRate = 1.3;
+    audio.playbackRate = 0.75;
+    actionHandler.adjustSpeed(video, 0.2, { relative: true });
+
+    expect(video.playbackRate).toBe(1.5);
+    expect(audio.playbackRate).toBe(1.5);
+    expect(video.vsc.speedIndicator.textContent).toBe('1.50');
+    expect(audio.vsc.speedIndicator.textContent).toBe('1.50');
+    expect(video.vsc.div.dataset.vscMediaType).toBe('video');
+    expect(audio.vsc.div.dataset.vscMediaType).toBe('audio');
+    expect(video.vsc.div.dataset.vscSyncRole).toBe('primary');
+    expect(audio.vsc.div.dataset.vscSyncRole).toBe('secondary');
+    expect(noteUserSet).toHaveBeenCalledTimes(2);
+    expect(noteUserSet.mock.calls[0][2]).toEqual({ startsAuthorityEpoch: true });
+    expect(noteUserSet.mock.calls[1][2]).toEqual({ startsAuthorityEpoch: false });
+  });
+
+  it('applies bulk relative speed actions only once to a Hover Zoom pair', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const { video, audio } = createHoverZoomMediaPair(config, actionHandler);
+
+    actionHandler.runAction('faster', 0.1);
+    expect(video.playbackRate).toBe(1.1);
+    expect(audio.playbackRate).toBe(1.1);
+
+    const popupBatch = actionHandler.createAuthorityBatch();
+    [video, audio].forEach((media) => {
+      actionHandler.adjustSpeed(media, 0.1, { relative: true, authorityBatch: popupBatch });
+    });
+    expect(video.playbackRate).toBe(1.2);
+    expect(audio.playbackRate).toBe(1.2);
+  });
+
+  it('shares reset memory across a Hover Zoom video/audio pair', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const { video, audio } = createHoverZoomMediaPair(config, actionHandler);
+
+    video.playbackRate = 2;
+    audio.playbackRate = 2;
+    actionHandler.resetSpeed(video, 1, 1.8);
+    expect(video.playbackRate).toBe(1);
+    expect(audio.playbackRate).toBe(1);
+    expect(video.vsc.speedBeforeReset).toBe(2);
+    expect(audio.vsc.speedBeforeReset).toBe(2);
+
+    actionHandler.resetSpeed(video, 1, 1.8);
+    expect(video.playbackRate).toBe(2);
+    expect(audio.playbackRate).toBe(2);
+    expect(video.vsc.speedBeforeReset).toBeNull();
+    expect(audio.vsc.speedBeforeReset).toBeNull();
+  });
+
+  it('fails open to independent badges when a Hover Zoom viewer becomes ambiguous', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const { container, video, audio } = createHoverZoomMediaPair(config, actionHandler);
+    const extraAudio = document.createElement('audio');
+    Object.defineProperties(extraAudio, {
+      playbackRate: { value: 1, writable: true, configurable: true },
+      readyState: { value: 2, writable: true, configurable: true },
+      currentSrc: {
+        value: 'https://example.com/extra.mp3',
+        writable: true,
+        configurable: true,
+      },
+    });
+    container.appendChild(extraAudio);
+    new window.VSC.VideoController(extraAudio, container, config, actionHandler);
+
+    expect(video.vsc.div.dataset.vscSyncRole).toBeUndefined();
+    expect(audio.vsc.div.dataset.vscSyncRole).toBeUndefined();
+    expect(extraAudio.vsc.div.dataset.vscSyncRole).toBeUndefined();
+
+    video.playbackRate = 1;
+    audio.playbackRate = 1;
+    actionHandler.adjustSpeed(video, 0.2, { relative: true });
+    expect(video.playbackRate).toBe(1.2);
+    expect(audio.playbackRate).toBe(1);
   });
 
   it('ActionHandler should handle faster action', async () => {

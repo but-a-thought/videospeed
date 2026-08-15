@@ -1,4 +1,4 @@
-import { launchChromeWithExtension, sleep } from './e2e-utils.js';
+import { getFixtureUrl, launchChromeWithExtension, sleep } from './e2e-utils.js';
 
 export default async function runLifecycleE2ETests() {
   console.log('🔒 Running Lifecycle E2E Tests...');
@@ -22,13 +22,9 @@ export default async function runLifecycleE2ETests() {
   try {
     const launched = await launchChromeWithExtension();
     browser = launched.browser;
-    const { page } = launched;
-    const worker = await browser.waitForTarget((target) => target.type() === 'service_worker', {
-      timeout: 15000,
-    });
-    const extensionId = new URL(worker.url()).host;
+    const { page, extensionOrigin } = launched;
     const storagePage = await browser.newPage();
-    await storagePage.goto(`chrome-extension://${extensionId}/ui/options/options.html`, {
+    await storagePage.goto(`${extensionOrigin}/ui/options/options.html`, {
       waitUntil: 'domcontentloaded',
     });
 
@@ -39,14 +35,15 @@ export default async function runLifecycleE2ETests() {
         (values) => new Promise((resolve) => chrome.storage.sync.set(values, resolve)),
         settings
       );
-    const fixtureUrl = `file://${process.cwd()}/tests/e2e/lifecycle.html`;
+    const fixtureUrl = getFixtureUrl('lifecycle.html');
+    const fixtureHostname = new URL(fixtureUrl).hostname;
 
     await clearStorage();
 
     await runTest('Inherited about frames fail closed under a disabled site rule', async () => {
       await setStorage({
         enabled: true,
-        siteRules: [{ pattern: 'tests/e2e/lifecycle.html', enabled: false, speed: null }],
+        siteRules: [{ pattern: fixtureHostname, enabled: false, speed: null }],
       });
       await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded' });
       await sleep(3000);

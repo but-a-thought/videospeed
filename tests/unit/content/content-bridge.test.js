@@ -326,6 +326,74 @@ describe('content-bridge', () => {
 
       expect(events).toEqual([{ type: 'VSC_SETTINGS_READY', detail: { abort: true } }]);
     });
+
+    it('clones all isolated-to-page payloads when Firefox cloneInto is available', async () => {
+      const cloneInto = vi.fn((detail) => structuredClone(detail));
+      vi.stubGlobal('cloneInto', cloneInto);
+      let runtimeListener;
+      vi.spyOn(globalThis.chrome.runtime.onMessage, 'addListener').mockImplementation(
+        (listener) => {
+          runtimeListener = listener;
+        }
+      );
+      const { events, cleanup } = collectEvents(
+        'VSC_SETTINGS_READY',
+        'VSC_STORAGE_CHANGED',
+        'VSC_MESSAGE'
+      );
+      eventCleanup = cleanup;
+
+      const onChanged = await loadBridge();
+      await requestSettings();
+      onChanged({ lastSpeed: { oldValue: 1, newValue: 2 } }, 'sync');
+      runtimeListener({ type: 'VSC_SHOW' });
+      onChanged({ enabled: { oldValue: true, newValue: false } }, 'sync');
+
+      expect(events.map((event) => event.type)).toEqual([
+        'VSC_SETTINGS_READY',
+        'VSC_STORAGE_CHANGED',
+        'VSC_MESSAGE',
+        'VSC_MESSAGE',
+      ]);
+      expect(events.at(-1).detail).toEqual({ type: 'VSC_TEARDOWN' });
+      expect(cloneInto).toHaveBeenCalledTimes(4);
+      expect(cloneInto.mock.calls.every(([, target]) => target === window)).toBe(true);
+    });
+
+    it('clones abort payloads for disabled Firefox pages', async () => {
+      const cloneInto = vi.fn((detail) => structuredClone(detail));
+      vi.stubGlobal('cloneInto', cloneInto);
+      getMockStorage().enabled = false;
+      const { events, cleanup } = collectEvents('VSC_SETTINGS_READY');
+      eventCleanup = cleanup;
+
+      await loadBridge();
+      await requestSettings();
+
+      expect(events).toEqual([{ type: 'VSC_SETTINGS_READY', detail: { abort: true } }]);
+      expect(cloneInto).toHaveBeenCalledOnce();
+    });
+
+    it('drops Firefox payloads when cloning fails so MAIN initialization fails closed', async () => {
+      vi.stubGlobal(
+        'cloneInto',
+        vi.fn(() => {
+          throw new Error('clone denied');
+        })
+      );
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { events, cleanup } = collectEvents('VSC_SETTINGS_READY');
+      eventCleanup = cleanup;
+
+      await loadBridge();
+      await requestSettings();
+
+      expect(events).toHaveLength(0);
+      expect(console.error).toHaveBeenCalledWith(
+        '[VSC] Failed to clone VSC_SETTINGS_READY payload into page context:',
+        expect.any(Error)
+      );
+    });
   });
 
   // =========================================================================

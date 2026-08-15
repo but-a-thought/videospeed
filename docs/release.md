@@ -3,19 +3,21 @@
 ## Invariants
 
 - `package.json` is the source of truth for the extension version. `package-lock.json` must carry the same root version.
-- The checked-in `manifest.json` keeps `"version": "0.0.0"`; `scripts/build.mjs` writes the package version into `dist/manifest.json`.
+- The checked-in `manifest.json` keeps `"version": "0.0.0"`; the build writes browser-specific manifests to `dist/chrome/manifest.json` and `dist/firefox/manifest.json`.
 - The release commit is pushed and passes CI before its tag is created.
 - Each release gets one annotated tag. Push that tag explicitly; never use `git push --tags`.
 - GitHub releases start as drafts and use the curated `docs/release-<version>.md` notes.
-- Chrome Web Store upload is manual. No active workflow publishes to the store.
+- Chrome Web Store and Firefox Add-ons submissions are manual. No active workflow stores signing credentials or publishes to either store.
 
 ## Build modes
 
-| Command                 | Minified | Use case                          |
-| ----------------------- | -------- | --------------------------------- |
-| `npm run build`         | No       | Local development and debugging   |
-| `npm run build:release` | Yes      | Release packaging                 |
-| `npm run release`       | Yes      | Clean, verify, build, and package |
+| Command                 | Minified | Use case                               |
+| ----------------------- | -------- | -------------------------------------- |
+| `npm run build`         | No       | Local Chrome development               |
+| `npm run build:firefox` | No       | Local Firefox development              |
+| `npm run build:all`     | No       | Build both browser targets             |
+| `npm run build:release` | Yes      | Build both release targets             |
+| `npm run release`       | Yes      | Clean, verify, build, and package both |
 
 Both build modes inject the version from `package.json` into the generated manifest.
 
@@ -59,11 +61,12 @@ The GitHub release helper rejects missing notes and any notes that still contain
 
 ## 4. Run local release gates
 
-Install exactly the lockfile, run browser coverage, then run the reproducible release pipeline:
+Install exactly the lockfile, run both browser smoke suites, then run the reproducible release pipeline:
 
 ```bash
 npm ci
-npm run test:e2e
+npm run test:e2e:chrome
+npm run test:e2e:firefox
 npm run release
 ```
 
@@ -74,19 +77,16 @@ npm run release
 3. `npm test`
 4. `npm run test:tlc`
 5. `npm run build:release`
-6. `node scripts/package-release.js`
+6. `npm run validate:builds` (including `web-ext lint` for Firefox)
+7. `node scripts/package-release.js`
 
-Inspect the generated archive before committing:
+The packaging and release helpers validate the generated archives without relying on platform-specific ZIP commands:
 
-```bash
-ZIP="release/videospeed-${VERSION}.zip"
-unzip -t "$ZIP"
-unzip -p "$ZIP" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))"
-unzip -l "$ZIP"
-shasum -a 256 "$ZIP"
-```
+- `release/videospeed-${VERSION}.zip` — Chrome Web Store package.
+- `release/videospeed-firefox-${VERSION}.zip` — AMO upload package.
+- `release/videospeed-source-${VERSION}.zip` — reproducible reviewer source, lockfile, tests, and build instructions.
 
-Confirm the manifest reports `${VERSION}`, the archive contains only extension/runtime files, and no source maps or OS metadata are present.
+Confirm both manifests report `${VERSION}`, the browser packages contain no source maps, and the source package contains no dependencies or generated output.
 
 ## 5. Commit and push release metadata
 
@@ -121,14 +121,10 @@ Download the release candidate produced by that run and repeat the archive check
 ```bash
 rm -rf "/tmp/videospeed-${VERSION}"
 gh run download <run-id> --name videospeed-release-node-22.x --dir "/tmp/videospeed-${VERSION}"
-cp "/tmp/videospeed-${VERSION}/videospeed-${VERSION}.zip" release/
-ZIP="release/videospeed-${VERSION}.zip"
-unzip -t "$ZIP"
-unzip -p "$ZIP" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).version))"
-shasum -a 256 "$ZIP"
+cp "/tmp/videospeed-${VERSION}"/videospeed-*.zip release/
 ```
 
-Use this CI-produced archive for the Chrome Web Store upload. The GitHub release helper independently locates the same successful exact-commit run and downloads its artifact again before creating the draft.
+Use these CI-produced archives for store submission. The GitHub release helper independently locates the same successful exact-commit run and validates all three files before creating the draft.
 
 ## 7. Create and push the single release tag
 
@@ -159,14 +155,16 @@ The helper verifies that:
 - the local tag is annotated and points at `HEAD`;
 - the remote tag is the same annotated tag object and peels to `HEAD`;
 - a successful `CI` push run exists for that exact commit;
-- that run's `videospeed-release-node-22.x` artifact contains an intact zip with the expected manifest version and no source maps;
+- that run's `videospeed-release-node-22.x` artifact contains valid Chrome, Firefox, and reviewer-source archives with matching versions;
 - GitHub operations target the explicit `github.com/owner/repository` derived from the `origin` URL, regardless of `GH_HOST`, `GH_REPO`, or current-directory overrides.
 
-The non-dry run downloads the verified artifact again and creates a draft titled `v${VERSION}` with that zip and the curated notes. Review the draft on GitHub and independently confirm the tag, notes, archive name, manifest version, and checksum before publishing.
+The non-dry run downloads the verified artifact again and creates a draft titled `v${VERSION}` with all three archives and the curated notes. Review the draft on GitHub and independently confirm the tag, notes, archive names, versions, and checksums before publishing.
 
-## 9. Publish and submit to the Chrome Web Store
+## 9. Publish and submit to the browser stores
 
 Publishing the GitHub draft does not upload to the Chrome Web Store. Upload the exact same `release/videospeed-${VERSION}.zip` manually in the Chrome Web Store developer dashboard, complete the store review flow, and verify the published listing after approval.
+
+For the first Firefox release, upload `release/videospeed-firefox-${VERSION}.zip` to AMO as an unlisted extension and provide `release/videospeed-source-${VERSION}.zip` to reviewers together with the instructions in `docs/firefox-reviewer-build.md`. Distribute only Mozilla's returned signed `.xpi`. After the beta matrix passes, submit a higher numeric version under the same Gecko ID as a listed AMO release; do not reuse the beta version number.
 
 ## Recovery rules
 

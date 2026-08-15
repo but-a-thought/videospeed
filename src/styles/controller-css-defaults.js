@@ -49,6 +49,18 @@ export const DEFAULT_CONTROLLER_CSS = `/* === Domain-based rules (stable — hos
 
 /* === DOM-contextual rules (may break if site changes HTML structure) === */
 
+/* Hover Zoom split DASH previews keep separate video and audio elements.
+   VSC retains both internal controllers for synchronized speed writes, hides
+   the redundant audio badge, and moves the primary video badge below Hover
+   Zoom's top-row controls. */
+#hzViewer vsc-controller[data-vsc-sync-role="primary"] {
+  top: 60px;
+}
+
+#hzViewer vsc-controller[data-vsc-sync-role="secondary"] {
+  display: none !important;
+}
+
 /* YouTube autohide — style the light-DOM host instead of relying on the
    deprecated Chromium-only :host-context() shadow selector. Explicit SHOW
    and temporary feedback stop matching this rule; HIDE and no-source remain

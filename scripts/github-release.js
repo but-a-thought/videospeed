@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { execFileSync } from 'child_process';
+import AdmZip from 'adm-zip';
+import { compareReleaseFiles } from './release-config.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -15,7 +17,9 @@ const version = pkg.version;
 const tag = `v${version}`;
 const releaseDir = path.join(rootDir, 'release');
 const zipName = `videospeed-${version}.zip`;
-const zipPath = path.join(releaseDir, zipName);
+const firefoxZipName = `videospeed-firefox-${version}.zip`;
+const sourceZipName = `videospeed-source-${version}.zip`;
+const releaseFiles = [zipName, firefoxZipName, sourceZipName];
 const curatedNotesPath = path.join(rootDir, 'docs', `release-${version}.md`);
 const artifactName = 'videospeed-release-node-22.x';
 const dryRun = process.argv.includes('--dry-run');
@@ -93,9 +97,10 @@ export function findSuccessfulCiRun(runs, commit) {
   );
 }
 
-export function inspectReleaseZip(archivePath, expectedVersion) {
-  runFile('unzip', ['-tqq', archivePath]);
-  const entries = runFile('unzip', ['-Z1', archivePath]).split('\n').filter(Boolean);
+export function inspectReleaseZip(archivePath, expectedVersion, browser = null) {
+  const zip = new AdmZip(fs.readFileSync(archivePath), { readEntries: true });
+  const zipEntries = zip.getEntries();
+  const entries = zipEntries.map((entry) => entry.entryName);
   const unsafeEntry = entries.find(
     (entry) => entry.startsWith('/') || entry.split('/').includes('..')
   );
@@ -106,17 +111,92 @@ export function inspectReleaseZip(archivePath, expectedVersion) {
     !entries.some((entry) => entry.endsWith('.map')),
     'source maps must not be published'
   );
+  const { missing, unexpected } = compareReleaseFiles(entries);
+  check('Release zip', missing.length === 0, `required files are missing: ${missing.join(', ')}`);
+  check(
+    'Release zip',
+    unexpected.length === 0,
+    `unexpected files are present: ${unexpected.join(', ')}`
+  );
 
-  const manifest = JSON.parse(runFile('unzip', ['-p', archivePath, 'manifest.json']));
+  const manifestEntry = zip.getEntry('manifest.json');
+  const manifest = JSON.parse(Buffer.from(manifestEntry.getData()).toString('utf8'));
   check(
     'Release zip',
     manifest.version === expectedVersion,
     `manifest version is ${manifest.version}, expected ${expectedVersion}`
   );
 
+  if (browser === 'chrome') {
+    check(
+      'Release zip',
+      manifest.background?.service_worker === 'background.js' && !manifest.background?.scripts,
+      'Chrome manifest background is invalid'
+    );
+  } else if (browser === 'firefox') {
+    check(
+      'Release zip',
+      manifest.background?.scripts?.[0] === 'background.js' && !manifest.background?.service_worker,
+      'Firefox manifest background is invalid'
+    );
+    check(
+      'Release zip',
+      manifest.browser_specific_settings?.gecko?.id === 'videospeed@but-a-thought.github',
+      'Firefox manifest Gecko ID is invalid'
+    );
+  }
+
+  for (const entry of zipEntries) {
+    if (!entry.isDirectory && entry !== manifestEntry) {
+      entry.getData();
+    }
+  }
+
   return {
     entries,
     manifest,
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex'),
+  };
+}
+
+export function inspectSourceZip(archivePath, expectedVersion) {
+  const zip = new AdmZip(fs.readFileSync(archivePath), { readEntries: true });
+  const zipEntries = zip.getEntries();
+  const entries = zipEntries.map((entry) => entry.entryName);
+  for (const requiredFile of [
+    'package.json',
+    'package-lock.json',
+    'manifest.json',
+    'scripts/build-config.mjs',
+    'scripts/build.mjs',
+    'scripts/release-config.mjs',
+    'src/entries/content-bridge.js',
+    'docs/firefox-reviewer-build.md',
+    'docs/release.md',
+  ]) {
+    check('Source zip', entries.includes(requiredFile), `${requiredFile} is missing`);
+  }
+  check(
+    'Source zip',
+    !entries.some((entry) => entry.startsWith('node_modules/') || entry.startsWith('dist/')),
+    'generated dependencies or build output must not be published as reviewer source'
+  );
+
+  const packageEntry = zip.getEntry('package.json');
+  const sourcePackage = JSON.parse(Buffer.from(packageEntry.getData()).toString('utf8'));
+  check(
+    'Source zip',
+    sourcePackage.version === expectedVersion,
+    `package version is ${sourcePackage.version}, expected ${expectedVersion}`
+  );
+  for (const entry of zipEntries) {
+    if (!entry.isDirectory && entry !== packageEntry) {
+      entry.getData();
+    }
+  }
+
+  return {
+    entries,
     sha256: crypto.createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex'),
   };
 }
@@ -215,7 +295,6 @@ function getReleaseContext() {
 async function createRelease() {
   const { repo, notes, ciRun } = getReleaseContext();
   const artifactDir = await fs.mkdtemp(path.join(os.tmpdir(), `vsc-release-${ciRun.databaseId}-`));
-  const artifactZip = path.join(artifactDir, zipName);
   const notesFile = path.join(artifactDir, 'release-notes.md');
 
   try {
@@ -230,21 +309,31 @@ async function createRelease() {
       '--dir',
       artifactDir,
     ]);
-    check(
-      'CI artifact',
-      await fs.pathExists(artifactZip),
-      `${zipName} was not present in ${artifactName}`
-    );
+    for (const fileName of releaseFiles) {
+      check(
+        'CI artifact',
+        await fs.pathExists(path.join(artifactDir, fileName)),
+        `${fileName} was not present in ${artifactName}`
+      );
+    }
 
-    const archive = inspectReleaseZip(artifactZip, version);
+    const chromeArchive = inspectReleaseZip(path.join(artifactDir, zipName), version, 'chrome');
+    const firefoxArchive = inspectReleaseZip(
+      path.join(artifactDir, firefoxZipName),
+      version,
+      'firefox'
+    );
+    const sourceArchive = inspectSourceZip(path.join(artifactDir, sourceZipName), version);
     console.log(`✅ Exact-commit CI: ${ciRun.url}`);
-    console.log(`✅ CI artifact SHA-256: ${archive.sha256}`);
+    console.log(`✅ Chrome SHA-256: ${chromeArchive.sha256}`);
+    console.log(`✅ Firefox SHA-256: ${firefoxArchive.sha256}`);
+    console.log(`✅ Reviewer source SHA-256: ${sourceArchive.sha256}`);
 
     const args = [
       'release',
       'create',
       tag,
-      zipPath,
+      ...releaseFiles.map((fileName) => path.join(releaseDir, fileName)),
       '--repo',
       repo,
       '--title',
@@ -262,7 +351,11 @@ async function createRelease() {
     }
 
     await fs.ensureDir(releaseDir);
-    await fs.copy(artifactZip, zipPath, { overwrite: true });
+    for (const fileName of releaseFiles) {
+      await fs.copy(path.join(artifactDir, fileName), path.join(releaseDir, fileName), {
+        overwrite: true,
+      });
+    }
     await fs.writeFile(notesFile, notes);
     const result = runFile('gh', args);
     console.log(`✅ Draft release created: ${result}`);

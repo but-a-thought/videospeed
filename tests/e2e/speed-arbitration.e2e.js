@@ -4,7 +4,7 @@
  * wiring; only site-originated register writes are deterministic test doubles.
  */
 
-import { assert, launchChromeWithExtension, sleep } from './e2e-utils.js';
+import { assert, getFixtureUrl, launchChromeWithExtension, sleep } from './e2e-utils.js';
 
 export default async function runSpeedArbitrationE2ETests() {
   console.log('🎭 Running Speed Arbitration E2E Tests...\n');
@@ -28,9 +28,9 @@ export default async function runSpeedArbitrationE2ETests() {
   try {
     const launched = await launchChromeWithExtension();
     browser = launched.browser;
-    const { page } = launched;
-    const fixtureUrl = `file://${process.cwd()}/tests/e2e/dual-video.html`;
-    const normalResetFixtureUrl = `file://${process.cwd()}/tests/e2e/test-video.html`;
+    const { page, extensionOrigin } = launched;
+    const fixtureUrl = getFixtureUrl('dual-video.html');
+    const normalResetFixtureUrl = getFixtureUrl('test-video.html');
     await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded' });
 
     // Opening an extension page can background the dual-video fixture and
@@ -41,12 +41,8 @@ export default async function runSpeedArbitrationE2ETests() {
       if (storagePage) {
         return storagePage;
       }
-      const worker = await browser.waitForTarget((target) => target.type() === 'service_worker', {
-        timeout: 15000,
-      });
-      const extensionId = new URL(worker.url()).host;
       storagePage = await browser.newPage();
-      await storagePage.goto(`chrome-extension://${extensionId}/ui/options/options.html`, {
+      await storagePage.goto(`${extensionOrigin}/ui/options/options.html`, {
         waitUntil: 'domcontentloaded',
       });
       return storagePage;

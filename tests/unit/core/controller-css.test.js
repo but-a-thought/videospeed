@@ -68,6 +68,16 @@ describe('ControllerCSS', () => {
     expect(css.includes('#player > vsc-controller')).toBe(true);
   });
 
+  it('shows one lowered badge for a synchronized Hover Zoom pair', () => {
+    const css = window.VSC.Constants.DEFAULT_CONTROLLER_CSS;
+    expect(css).toMatch(
+      /#hzViewer vsc-controller\[data-vsc-sync-role="primary"\]\s*\{[^}]*top:\s*60px;/s
+    );
+    expect(css).toMatch(
+      /#hzViewer vsc-controller\[data-vsc-sync-role="secondary"\]\s*\{[^}]*display:\s*none !important;/s
+    );
+  });
+
   it('implements YouTube autohide on the light-DOM host without :host-context()', () => {
     const css = window.VSC.Constants.DEFAULT_CONTROLLER_CSS;
     const shadowSource = readFileSync(join(process.cwd(), 'src/ui/shadow-dom.js'), 'utf8');
