@@ -176,6 +176,7 @@ class VideoController {
       speed: speed,
       opacity: this.config.settings.controllerOpacity,
       buttonSize: this.config.settings.controllerButtonSize,
+      quickSpeeds: this.config.settings.quickSpeeds,
     });
 
     // Set up control events
@@ -183,6 +184,15 @@ class VideoController {
 
     // Store speed indicator reference
     this.speedIndicator = window.VSC.ShadowDOMManager.getSpeedIndicator(shadow);
+
+    this.unsubscribeSettingsChanges = this.config.onSettingsChanged?.((changes) => {
+      if (changes.quickSpeeds && this.video.vsc === this) {
+        window.VSC.ShadowDOMManager.updateQuickSpeedButtons(
+          shadow,
+          this.config.settings.quickSpeeds
+        );
+      }
+    });
 
     // Insert into DOM FIRST — position calculation needs the wrapper in the DOM
     this.insertIntoDOM(document, wrapper);
@@ -426,6 +436,10 @@ class VideoController {
     if (this.controllerPlacementObserver) {
       this.controllerPlacementObserver.disconnect();
       this.controllerPlacementObserver = null;
+    }
+    if (this.unsubscribeSettingsChanges) {
+      this.unsubscribeSettingsChanges();
+      this.unsubscribeSettingsChanges = null;
     }
 
     // Remove DOM element

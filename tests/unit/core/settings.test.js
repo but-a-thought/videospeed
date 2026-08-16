@@ -32,6 +32,18 @@ describe('Settings', () => {
     expect(config.settings.enabled).toBe(true);
     expect(config.settings.lastSpeed).toBe(1.0);
     expect(config.settings.logLevel).toBe(3);
+    expect(config.settings.quickSpeeds).toEqual([1.5, 2.0]);
+  });
+
+  it('normalizes quick-speed slots independently', () => {
+    const normalize = window.VSC.Constants.normalizeQuickSpeeds;
+
+    expect(normalize(undefined)).toEqual([1.5, 2.0]);
+    expect(normalize([1.25])).toEqual([1.25, 2.0]);
+    expect(normalize([0.01, 3.5])).toEqual([1.5, 3.5]);
+    expect(normalize([4, Infinity])).toEqual([4, 2.0]);
+    expect(normalize(['1.75', 17])).toEqual([1.5, 2.0]);
+    expect(normalize([1.234, 2.678])).toEqual([1.23, 2.68]);
   });
 
   it('VideoSpeedConfig should load settings from storage', async () => {

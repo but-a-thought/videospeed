@@ -12,7 +12,14 @@ class ShadowDOMManager {
    * @returns {ShadowRoot} Created shadow root
    */
   static createShadowDOM(wrapper, options = {}) {
-    const { top = '0px', left = '0px', speed = '1.00', opacity = 0.3, buttonSize = 14 } = options;
+    const {
+      top = '0px',
+      left = '0px',
+      speed = '1.00',
+      opacity = 0.3,
+      buttonSize = 14,
+      quickSpeeds = window.VSC.Constants.DEFAULT_QUICK_SPEEDS,
+    } = options;
 
     const shadow = wrapper.attachShadow({ mode: 'open' });
 
@@ -80,6 +87,14 @@ class ShadowDOMManager {
         display: none;
         vertical-align: middle;
       }
+
+      #quick-speeds {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        margin-right: 5px;
+        vertical-align: middle;
+      }
       
       #controller.dragging {
         cursor: -webkit-grabbing;
@@ -142,6 +157,18 @@ class ShadowDOMManager {
       button.rw {
         opacity: 0.65;
       }
+
+      button.quick-speed {
+        display: inline-block;
+        width: 20px;
+        min-width: 20px;
+        height: 20px;
+        padding: 0;
+        margin: 0;
+        border-radius: 50%;
+        line-height: 20px;
+        box-sizing: border-box;
+      }
     `;
     shadow.appendChild(style);
 
@@ -149,6 +176,20 @@ class ShadowDOMManager {
     const controller = document.createElement('div');
     controller.id = 'controller';
     controller.style.cssText = `top:${top}; left:${left}; opacity:${opacity};`;
+
+    // Quick-speed circles are always present whenever the controller is
+    // visible. Their accessible names carry the values so the circles can
+    // remain visually empty and compact.
+    const quickSpeedControls = document.createElement('span');
+    quickSpeedControls.id = 'quick-speeds';
+    for (let index = 0; index < 2; index++) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'quick-speed';
+      button.dataset.quickSpeedIndex = String(index);
+      quickSpeedControls.appendChild(button);
+    }
+    controller.appendChild(quickSpeedControls);
 
     // Create draggable speed indicator
     const draggable = document.createElement('span');
@@ -183,6 +224,7 @@ class ShadowDOMManager {
 
     controller.appendChild(controls);
     shadow.appendChild(controller);
+    this.updateQuickSpeedButtons(shadow, quickSpeeds);
 
     window.VSC.logger.debug('Shadow DOM created for video controller');
     return shadow;
@@ -222,6 +264,23 @@ class ShadowDOMManager {
    */
   static getButtons(shadow) {
     return shadow.querySelectorAll('button');
+  }
+
+  /**
+   * Refresh quick-speed action values and accessible metadata.
+   * @param {ShadowRoot} shadow
+   * @param {*} speeds
+   */
+  static updateQuickSpeedButtons(shadow, speeds) {
+    const normalized = window.VSC.Constants.normalizeQuickSpeeds(speeds);
+    shadow.querySelectorAll('button.quick-speed').forEach((button, index) => {
+      const speed = normalized[index];
+      const displaySpeed = Number(speed.toFixed(2)).toString();
+      const label = `Set speed to ${displaySpeed}×`;
+      button.dataset.speed = String(speed);
+      button.title = label;
+      button.setAttribute('aria-label', label);
+    });
   }
 
   /**

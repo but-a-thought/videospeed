@@ -66,12 +66,18 @@ class ControlsManager {
       button.addEventListener(
         'click',
         (e) => {
-          this.actionHandler.runAction(
-            e.target.dataset['action'],
-            this.config.getKeyBinding(e.target.dataset['action']),
-            e
-          );
+          const target = e.currentTarget;
+          if (target.classList.contains('quick-speed')) {
+            this.actionHandler.runAction('SET_SPEED', Number(target.dataset.speed), e);
+          } else {
+            this.actionHandler.runAction(
+              target.dataset.action,
+              this.config.getKeyBinding(target.dataset.action),
+              e
+            );
+          }
           e.stopPropagation();
+          e.preventDefault();
         },
         true
       );

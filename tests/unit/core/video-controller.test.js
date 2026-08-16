@@ -8,6 +8,7 @@ import {
   installChromeMock,
   cleanupChromeMock,
   resetMockStorage,
+  simulateExternalStorageWrite,
 } from '../../helpers/chrome-mock.js';
 import { createMockVideo, createMockDOM } from '../../helpers/test-utils.js';
 
@@ -139,6 +140,28 @@ describe('VideoController', () => {
     expect(controller.div).toBeDefined();
     expect(controller.div.classList.contains('vsc-controller')).toBe(true);
     expect(controller.speedIndicator).toBeDefined();
+  });
+
+  it('updates quick-speed buttons live and unsubscribes during removal', async () => {
+    const config = new window.VSC.VideoSpeedConfig();
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const baselineListeners = config.settingsChangeListeners.size;
+
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    expect(config.settingsChangeListeners.size).toBe(baselineListeners + 1);
+
+    simulateExternalStorageWrite({ quickSpeeds: [1.37, 2.25] });
+
+    const buttons = controller.div.shadowRoot.querySelectorAll('button.quick-speed');
+    expect(buttons[0].dataset.speed).toBe('1.37');
+    expect(buttons[1].title).toBe('Set speed to 2.25×');
+
+    controller.remove();
+    expect(config.settingsChangeListeners.size).toBe(baselineListeners);
   });
 
   it('tracks automatic media visibility beneath an explicit override', async () => {

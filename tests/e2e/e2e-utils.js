@@ -363,6 +363,34 @@ export async function controlVideo(page, action) {
 }
 
 /**
+ * Click one of the two always-visible quick-speed circles.
+ * @param {Page} page
+ * @param {number} index Zero-based preset index
+ * @returns {Promise<boolean>}
+ */
+export async function controlQuickSpeed(page, index) {
+  try {
+    const success = await page.evaluate((quickSpeedIndex) => {
+      const controller = document.querySelector('.vsc-controller');
+      const button = controller?.shadowRoot?.querySelector(
+        `button.quick-speed[data-quick-speed-index="${quickSpeedIndex}"]`
+      );
+      if (!button) {
+        return false;
+      }
+      button.click();
+      return true;
+    }, index);
+    if (success) {
+      await sleep(300);
+    }
+    return success;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Test keyboard shortcuts
  * @param {Page} page - Puppeteer page object
  * @param {string} key - Key to press

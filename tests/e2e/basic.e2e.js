@@ -10,6 +10,7 @@ import {
   waitForController,
   getVideoSpeed,
   controlVideo,
+  controlQuickSpeed,
   testKeyboardShortcut,
   getControllerSpeedDisplay,
   takeScreenshot,
@@ -103,6 +104,250 @@ export default async function runBasicE2ETests() {
       // Speed display should show something like "1.00"
       assert.true(speedDisplay.includes('1.'), 'Speed display should show 1.x');
     });
+
+    await runTest(
+      'Quick-speed circles should stay visible beside the draggable speed',
+      async () => {
+        const state = await page.evaluate(() => {
+          const shadow = document.querySelector('.vsc-controller')?.shadowRoot;
+          const controller = shadow?.querySelector('#controller');
+          const quickSpeeds = shadow?.querySelector('#quick-speeds');
+          const buttons = Array.from(shadow?.querySelectorAll('button.quick-speed') || []);
+          return {
+            childOrder: Array.from(controller?.children || []).map(
+              (child) => child.id || child.className
+            ),
+            labels: buttons.map((button) => button.textContent),
+            titles: buttons.map((button) => button.title),
+            sizes: buttons.map((button) => {
+              const style = getComputedStyle(button);
+              return { width: style.width, height: style.height, radius: style.borderRadius };
+            }),
+            quickDisplay: quickSpeeds ? getComputedStyle(quickSpeeds).display : null,
+            dragAction: shadow?.querySelector('.draggable')?.dataset.action,
+          };
+        });
+
+        assert.equal(state.childOrder[0], 'quick-speeds', 'Quick speeds should render first');
+        assert.true(
+          state.childOrder[1].includes('draggable'),
+          'Current speed should remain the drag handle'
+        );
+        assert.equal(state.childOrder[2], 'controls', 'Hover controls should remain last');
+        assert.equal(state.labels.join(''), '', 'Quick-speed circles should be visually empty');
+        assert.equal(state.titles[0], 'Set speed to 1.5×', 'First tooltip should expose its speed');
+        assert.equal(state.titles[1], 'Set speed to 2×', 'Second tooltip should expose its speed');
+        assert.equal(state.sizes[0].width, '20px', 'Quick-speed width should be 20px');
+        assert.equal(state.sizes[0].height, '20px', 'Quick-speed height should be 20px');
+        assert.equal(state.sizes[0].radius, '50%', 'Quick-speed button should be circular');
+        assert.equal(
+          state.quickDisplay,
+          'inline-flex',
+          'Quick speeds should not be hover-collapsed'
+        );
+        assert.equal(state.dragAction, 'drag', 'Current-speed number should remain draggable');
+      }
+    );
+
+    await runTest('Quick-speed circles should set their independent default speeds', async () => {
+      assert.true(await controlQuickSpeed(page, 0), 'First quick-speed circle should exist');
+      assert.equal(await getVideoSpeed(page), 1.5, 'First quick speed should default to 1.5x');
+      assert.true(await controlQuickSpeed(page, 1), 'Second quick-speed circle should exist');
+      assert.equal(await getVideoSpeed(page), 2.0, 'Second quick speed should default to 2.0x');
+    });
+
+    if (browserName === 'chrome') {
+      await runTest('Options should validate, export, import, and reset quick speeds', async () => {
+        const optionsPage = await browser.newPage();
+        try {
+          await optionsPage.goto(`${extensionOrigin}/ui/options/options.html`, {
+            waitUntil: 'domcontentloaded',
+          });
+          await optionsPage.waitForFunction(
+            () =>
+              document.querySelector('#quickSpeed1')?.value &&
+              document.querySelector('#quickSpeed2')?.value,
+            { timeout: 10000 }
+          );
+
+          const invalidStatus = await optionsPage.evaluate(async () => {
+            document.querySelector('#quickSpeed1').value = '0.01';
+            document.querySelector('#quickSpeed2').value = '2.25';
+            document.querySelector('#save').click();
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            return document.querySelector('#status').textContent;
+          });
+          assert.true(
+            invalidStatus.includes('must be between 0.07 and 16'),
+            'Out-of-range quick speeds should be rejected'
+          );
+
+          await optionsPage.evaluate(() => {
+            document.querySelector('#quickSpeed1').value = '1.11';
+            document.querySelector('#quickSpeed2').value = '2.22';
+            document.querySelector('#save').click();
+          });
+          await optionsPage.waitForFunction(
+            () =>
+              window.VSC?.videoSpeedConfig?.settings?.quickSpeeds?.[0] === 1.11 &&
+              window.VSC?.videoSpeedConfig?.settings?.quickSpeeds?.[1] === 2.22,
+            { timeout: 10000 }
+          );
+
+          const exportedQuickSpeeds = await optionsPage.evaluate(async () => {
+            const capture = {};
+            window.__quickSpeedExportCapture = capture;
+            URL.createObjectURL = (blob) => {
+              capture.blob = blob;
+              return 'blob:quick-speed-test';
+            };
+            URL.revokeObjectURL = (url) => {
+              capture.revokedUrl = url;
+            };
+            HTMLAnchorElement.prototype.click = function () {
+              capture.download = this.download;
+            };
+            document.querySelector('#export').click();
+            while (!capture.blob) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            const exported = JSON.parse(await capture.blob.text());
+            return {
+              quickSpeeds: exported.quickSpeeds,
+              download: capture.download,
+              revokedUrl: capture.revokedUrl,
+            };
+          });
+          assert.equal(
+            JSON.stringify(exportedQuickSpeeds.quickSpeeds),
+            JSON.stringify([1.11, 2.22]),
+            'Export should include both quick speeds'
+          );
+          assert.equal(
+            exportedQuickSpeeds.download,
+            'videospeed-settings.json',
+            'Export should retain the settings filename'
+          );
+          assert.equal(
+            exportedQuickSpeeds.revokedUrl,
+            'blob:quick-speed-test',
+            'Export should release its object URL'
+          );
+
+          await optionsPage.evaluate(() => {
+            const settings = {
+              ...window.VSC.videoSpeedConfig.settings,
+              quickSpeeds: [1.23, 3.45],
+            };
+            const file = new File([JSON.stringify(settings)], 'settings.json', {
+              type: 'application/json',
+            });
+            const transfer = new DataTransfer();
+            transfer.items.add(file);
+            const input = document.querySelector('#importFile');
+            Object.defineProperty(input, 'files', {
+              configurable: true,
+              value: transfer.files,
+            });
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+          await optionsPage.waitForFunction(
+            () =>
+              document.querySelector('#quickSpeed1')?.value === '1.23' &&
+              document.querySelector('#quickSpeed2')?.value === '3.45',
+            { timeout: 10000 }
+          );
+
+          await optionsPage.evaluate(() => document.querySelector('#restore').click());
+          await optionsPage.waitForFunction(
+            () =>
+              document.querySelector('#quickSpeed1')?.value === '1.5' &&
+              document.querySelector('#quickSpeed2')?.value === '2',
+            { timeout: 10000 }
+          );
+        } finally {
+          await optionsPage.close();
+        }
+      });
+    }
+
+    await runTest(
+      'Quick-speed settings should update existing controllers without reload',
+      async () => {
+        if (browserName === 'chrome') {
+          const optionsPage = await browser.newPage();
+          try {
+            await optionsPage.goto(`${extensionOrigin}/ui/options/options.html`, {
+              waitUntil: 'domcontentloaded',
+            });
+            await optionsPage.waitForFunction(
+              () =>
+                document.querySelector('#quickSpeed1')?.value &&
+                document.querySelector('#quickSpeed2')?.value,
+              { timeout: 10000 }
+            );
+            await optionsPage.evaluate(() => {
+              const first = document.querySelector('#quickSpeed1');
+              const second = document.querySelector('#quickSpeed2');
+              first.value = '1.37';
+              second.value = '2.25';
+              first.dispatchEvent(new Event('input', { bubbles: true }));
+              second.dispatchEvent(new Event('input', { bubbles: true }));
+              document.querySelector('#save').click();
+            });
+            await optionsPage.waitForFunction(
+              () =>
+                window.VSC?.videoSpeedConfig?.settings?.quickSpeeds?.[0] === 1.37 &&
+                window.VSC?.videoSpeedConfig?.settings?.quickSpeeds?.[1] === 2.25,
+              { timeout: 10000 }
+            );
+          } finally {
+            await optionsPage.close();
+          }
+        } else {
+          // Firefox WebDriver BiDi does not permit direct moz-extension://
+          // navigation. Exercise the same inbound storage-change relay that an
+          // already-open options page triggers after chrome.storage.sync.set().
+          await page.evaluate(() => {
+            document.documentElement.dispatchEvent(
+              new CustomEvent('VSC_STORAGE_CHANGED', {
+                detail: {
+                  quickSpeeds: {
+                    oldValue: [1.5, 2.0],
+                    newValue: [1.37, 2.25],
+                  },
+                },
+              })
+            );
+          });
+        }
+
+        await page.waitForFunction(
+          () => {
+            const config = window.VSC_controller?.config;
+            const buttons = document
+              .querySelector('.vsc-controller')
+              ?.shadowRoot?.querySelectorAll('button.quick-speed');
+            return (
+              config?.settings?.quickSpeeds?.[0] === 1.37 &&
+              buttons?.[0]?.dataset.speed === '1.37' &&
+              buttons?.[1]?.title === 'Set speed to 2.25×'
+            );
+          },
+          { timeout: 10000 }
+        );
+
+        assert.true(
+          await controlQuickSpeed(page, 0),
+          'Updated first quick-speed circle should work'
+        );
+        assert.equal(
+          await getVideoSpeed(page),
+          1.37,
+          'Updated speed should apply without reloading'
+        );
+      }
+    );
 
     await runTest('Faster button should increase speed', async () => {
       const initialSpeed = await getVideoSpeed(page);
@@ -366,6 +611,47 @@ export default async function runBasicE2ETests() {
       assert.equal(rates.video, 1.5, 'Wheel should increase the primary video speed once');
       assert.equal(rates.audio, 1.5, 'Wheel should apply the same speed to hidden audio');
     });
+
+    await runTest(
+      'Hover Zoom quick speed should synchronize both streams exactly once',
+      async () => {
+        const result = await page.evaluate(async () => {
+          const fixture = window.hoverZoomFixture;
+          const button = fixture.controllerNode?.shadowRoot?.querySelector(
+            'button.quick-speed[data-quick-speed-index="1"]'
+          );
+          button?.click();
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          return {
+            clicked: Boolean(button),
+            videoSpeed: fixture.video.playbackRate,
+            audioSpeed: fixture.audio.playbackRate,
+            videoIndicator: fixture.controller?.speedIndicator?.textContent,
+            audioIndicator: fixture.audioController?.speedIndicator?.textContent,
+          };
+        });
+
+        assert.true(result.clicked, 'Visible badge should expose the second quick-speed circle');
+        const expectedSpeed = browserName === 'chrome' ? 2.25 : 2.0;
+        const expectedIndicator = expectedSpeed.toFixed(2);
+        assert.equal(result.videoSpeed, expectedSpeed, 'Quick speed should set the primary video');
+        assert.equal(
+          result.audioSpeed,
+          expectedSpeed,
+          'Quick speed should set hidden audio exactly once'
+        );
+        assert.equal(
+          result.videoIndicator,
+          expectedIndicator,
+          'Video indicator should show the quick speed'
+        );
+        assert.equal(
+          result.audioIndicator,
+          expectedIndicator,
+          'Audio indicator should remain synchronized'
+        );
+      }
+    );
 
     await runTest('Hover Zoom lock should preserve and reattach the controller', async () => {
       const speedBeforeLock = await page.evaluate(() => ({
