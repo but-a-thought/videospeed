@@ -73,8 +73,8 @@ we don't read at a fixed pace, and we shouldn't watch at one either.
   and tabs.
 - **Speed fightback** - automatically re-applies your chosen speed when a
   site's player tries to reset it.
-- **Draggable overlay** - reposition the on-video speed indicator anywhere
-  you like.
+- **Draggable overlay** - reposition the on-video speed indicator anywhere you
+  like, then save a per-website pixel offset from the hover controls.
 - **Fully customizable shortcuts** - remap every key, add modifier combos
   (Ctrl, Shift, Alt), create multiple preferred-speed toggles.
 - **Custom controller CSS** - style or reposition the overlay with your own

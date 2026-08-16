@@ -132,6 +132,17 @@
           <button id="add-site-rule">Add Site Rule</button>
           <div id="siteRulesValidation" class="css-validation"></div>
         </div>
+        <div class="row saved-controller-positions-row">
+          <label
+            >Saved controller positions<br />
+            <em
+              >Pixel offsets saved from the controller’s 💾 button. These positions stay on this
+              device and are not synced.</em
+            >
+          </label>
+          <div id="saved-controller-positions" aria-live="polite"></div>
+          <button id="clear-controller-positions" type="button" class="secondary">Clear All</button>
+        </div>
         <div class="row">
           <label for="controllerCSS"
             >Custom CSS<br />
@@ -258,8 +269,10 @@ vsc-controller { top: 50px !important; }
             >
           </p>
           <p>
-            You can also drag the controller to a new position on any page. See the existing rules
-            for YouTube, Netflix, etc. as reference.
+            You can also drag the controller to a new position on any page. Hover over it and click
+            the <strong>💾</strong> button to remember that pixel offset for the current website.
+            Saved positions stay on this device and can be removed under
+            <strong>Advanced &gt; Saved controller positions</strong>.
           </p>
 
           <h4 id="faq-missing">The controller is not appearing on a site. Why?</h4>

@@ -34,6 +34,13 @@ describe('QuickSpeedButtons', () => {
     expect(css).toContain('height: 20px');
     expect(css).toContain('border-radius: 50%');
     expect(css).toContain('#quick-speeds');
+
+    const savePosition = shadow.querySelector('button.save-position');
+    expect(savePosition.dataset.action).toBe('save-position');
+    expect(savePosition.textContent).toBe('💾');
+    expect(savePosition.getAttribute('aria-label')).toBe(
+      'Save controller position for this website'
+    );
   });
 
   it('routes each circle through an absolute SET_SPEED action without page propagation', () => {
@@ -49,9 +56,16 @@ describe('QuickSpeedButtons', () => {
     const buttons = shadow.querySelectorAll('button.quick-speed');
     buttons[0].click();
     buttons[1].click();
+    shadow.querySelector('button.save-position').click();
 
     expect(actionHandler.runAction).toHaveBeenNthCalledWith(1, 'SET_SPEED', 1.5, expect.any(Event));
     expect(actionHandler.runAction).toHaveBeenNthCalledWith(2, 'SET_SPEED', 2.0, expect.any(Event));
+    expect(actionHandler.runAction).toHaveBeenNthCalledWith(
+      3,
+      'save-position',
+      undefined,
+      expect.any(Event)
+    );
     expect(pageClick).not.toHaveBeenCalled();
     expect(wrapper.shadowRoot.querySelector('.draggable').dataset.action).toBe('drag');
 

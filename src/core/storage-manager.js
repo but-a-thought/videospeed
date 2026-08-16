@@ -137,6 +137,39 @@ if (!window.VSC.StorageManager) {
     }
 
     /**
+     * Persist a validated controller offset for the current site. Position
+     * writes use a dedicated bridge event and chrome.storage.local so they do
+     * not enter synced settings.
+     * @param {{x: number, y: number}} position
+     * @returns {Promise<void>}
+     */
+    static async setControllerPosition(position) {
+      const normalized = window.VSC.ControllerPosition.normalize(position);
+      if (!normalized) {
+        throw new Error('Invalid controller position');
+      }
+
+      if (hasChrome) {
+        const key = window.VSC.ControllerPosition.getStorageKey(window.location);
+        if (!key || !chrome.storage.local) {
+          throw new Error('Controller position storage is unavailable');
+        }
+        return new Promise((resolve, reject) => {
+          chrome.storage.local.set({ [key]: normalized }, () => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(`Storage failed: ${chrome.runtime.lastError.message}`));
+              return;
+            }
+            resolve();
+          });
+        });
+      }
+
+      docEl.dispatchEvent(new CustomEvent('VSC_WRITE_CONTROLLER_POSITION', { detail: normalized }));
+      return Promise.resolve();
+    }
+
+    /**
      * Remove keys from storage.
      * @param {Array<string>} keys - Keys to remove
      * @returns {Promise<void>}

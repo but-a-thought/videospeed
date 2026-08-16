@@ -8,6 +8,7 @@ import {
   resetMockStorage,
 } from '../../helpers/chrome-mock.js';
 import { createMockVideo, createMockDOM } from '../../helpers/test-utils.js';
+import { vi } from 'vitest';
 let mockDOM;
 
 describe('DragAndReset', () => {
@@ -143,5 +144,107 @@ describe('DragAndReset', () => {
     // Check that the shadow DOM style contains touch-action: none for .draggable
     const style = controller.div.shadowRoot.querySelector('style');
     expect(style.textContent.includes('touch-action: none')).toBe(true);
+  });
+
+  it('restores and reads a saved offset relative to the natural baseline', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    config.settings.controllerPosition = { x: -25, y: 150 };
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const inner = controller.div.shadowRoot.querySelector('#controller');
+
+    expect(controller.getControllerPositionOffset()).toEqual({ x: -25, y: 150 });
+    expect(Number.parseInt(inner.style.left, 10)).toBe(controller.controllerBaseline.left - 25);
+    expect(Number.parseInt(inner.style.top, 10)).toBe(controller.controllerBaseline.top + 150);
+  });
+
+  it('layers the saved inner offset on player-targeted relative host CSS', async () => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .tiktok-web-player vsc-controller {
+        position: relative !important;
+        top: 150px !important;
+      }
+    `;
+    document.head.appendChild(style);
+    const player = document.createElement('div');
+    player.className = 'tiktok-web-player';
+    document.body.appendChild(player);
+
+    try {
+      const config = window.VSC.videoSpeedConfig;
+      await config.load();
+      config.settings.controllerPosition = { x: 12, y: 40 };
+      const eventManager = new window.VSC.EventManager(config, null);
+      const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+      const mockVideo = createMockVideo();
+      player.appendChild(mockVideo);
+
+      const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+      const inner = controller.div.shadowRoot.querySelector('#controller');
+
+      expect(getComputedStyle(controller.div).position).toBe('relative');
+      expect(getComputedStyle(controller.div).top).toBe('150px');
+      expect(controller.controllerBaseline).toEqual({ top: 0, left: 0 });
+      expect(inner.style.left).toBe('12px');
+      expect(inner.style.top).toBe('40px');
+    } finally {
+      player.remove();
+      style.remove();
+    }
+  });
+
+  it('saves the current displacement and shows success feedback', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const saveSpy = vi.spyOn(config, 'saveControllerPosition').mockResolvedValue(true);
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const inner = controller.div.shadowRoot.querySelector('#controller');
+    inner.style.left = `${controller.controllerBaseline.left + 35}px`;
+    inner.style.top = `${controller.controllerBaseline.top - 40}px`;
+
+    const button = controller.div.shadowRoot.querySelector('button.save-position');
+    button.click();
+    await Promise.resolve();
+
+    expect(saveSpy).toHaveBeenCalledWith({ x: 35, y: -40 });
+    expect(button.textContent).toBe('✓');
+    expect(button.classList.contains('saved')).toBe(true);
+  });
+
+  it('applies a saved-position change to every controller in the document', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+    const firstVideo = createMockVideo();
+    const secondVideo = createMockVideo();
+    mockDOM.container.append(firstVideo, secondVideo);
+    const first = new window.VSC.VideoController(firstVideo, null, config, actionHandler);
+    const second = new window.VSC.VideoController(secondVideo, null, config, actionHandler);
+
+    config.settings.controllerPosition = { x: 60, y: -20 };
+    config._notifySettingsChanged({
+      controllerPosition: { oldValue: null, newValue: config.settings.controllerPosition },
+    });
+
+    expect(first.getControllerPositionOffset()).toEqual({ x: 60, y: -20 });
+    expect(second.getControllerPositionOffset()).toEqual({ x: 60, y: -20 });
+
+    config.settings.controllerPosition = null;
+    config._notifySettingsChanged({
+      controllerPosition: { oldValue: { x: 60, y: -20 }, newValue: null },
+    });
+    expect(first.getControllerPositionOffset()).toEqual({ x: 0, y: 0 });
+    expect(second.getControllerPositionOffset()).toEqual({ x: 0, y: 0 });
   });
 });

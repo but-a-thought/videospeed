@@ -12,6 +12,7 @@ export async function loadCoreModules() {
   await import('../../src/utils/constants.js');
   await import('../../src/utils/logger.js');
   await import('../../src/utils/dom-utils.js');
+  await import('../../src/utils/controller-position.js');
   // Speed arbitration decision core — constructed by EventManager and
   // VideoController, so must be registered before either is instantiated.
   await import('../../src/core/arbiter.js');
@@ -73,6 +74,7 @@ export async function loadInjectModules() {
 export async function loadMinimalModules() {
   await import('../../src/utils/constants.js');
   await import('../../src/utils/logger.js');
+  await import('../../src/utils/controller-position.js');
   await import('../../src/core/storage-manager.js');
   await import('../../src/core/settings.js');
 }

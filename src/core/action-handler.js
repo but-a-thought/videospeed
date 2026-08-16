@@ -118,6 +118,10 @@ class ActionHandler {
         window.VSC.DragHandler.handleDrag(video, e);
         break;
 
+      case 'save-position':
+        this.saveControllerPosition(video, e);
+        break;
+
       case 'fast':
         window.VSC.logger.debug('Preferred speed');
         this.resetSpeed(video, value, this.config.getKeyBinding('reset'), options);
@@ -167,6 +171,40 @@ class ActionHandler {
       default:
         window.VSC.logger.warn(`Unknown action: ${action}`);
     }
+  }
+
+  /**
+   * Persist the acting controller's displacement and show compact feedback.
+   * @param {HTMLMediaElement} video
+   * @param {Event} event
+   * @private
+   */
+  async saveControllerPosition(video, event) {
+    const position = video.vsc?.getControllerPositionOffset?.();
+    const button = event?.currentTarget || event?.target;
+    if (!position) {
+      return;
+    }
+
+    const saved = await this.config.saveControllerPosition(position);
+    if (!saved || !button?.classList?.contains('save-position')) {
+      return;
+    }
+
+    if (button.positionSavedTimer !== undefined) {
+      clearTimeout(button.positionSavedTimer);
+    }
+    button.textContent = '✓';
+    button.classList.add('saved');
+    button.title = 'Controller position saved for this website';
+    button.setAttribute('aria-label', 'Controller position saved for this website');
+    button.positionSavedTimer = setTimeout(() => {
+      button.textContent = '💾';
+      button.classList.remove('saved');
+      button.title = 'Update saved controller position for this website';
+      button.setAttribute('aria-label', 'Update saved controller position for this website');
+      button.positionSavedTimer = undefined;
+    }, 1500);
   }
 
   /**

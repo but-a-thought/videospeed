@@ -10,6 +10,10 @@ if (!window.VSC.VideoSpeedConfig) {
       this.settings = {
         ...window.VSC.Constants.DEFAULT_SETTINGS,
         quickSpeeds: [...window.VSC.Constants.DEFAULT_QUICK_SPEEDS],
+        // Device-local, current-site-only runtime setting supplied by the
+        // isolated bridge. It is intentionally absent from DEFAULT_SETTINGS
+        // so options sync/import/export cannot persist it accidentally.
+        controllerPosition: null,
       };
       this.pendingSave = null;
       this.saveTimer = null;
@@ -208,6 +212,9 @@ if (!window.VSC.VideoSpeedConfig) {
           window.VSC.StorageManager.remove(['controllerCSS']);
         }
         this.settings.customCSS = storage.customCSS ?? '';
+        this.settings.controllerPosition = window.VSC.ControllerPosition.normalize(
+          storage.controllerPosition
+        );
         this.settings.logLevel = Number(
           storage.logLevel || window.VSC.Constants.DEFAULT_SETTINGS.logLevel
         );
@@ -254,6 +261,39 @@ if (!window.VSC.VideoSpeedConfig) {
       this.settings.lastSpeed = speed;
       if (this.settings.rememberSpeed) {
         this.save({ lastSpeed: speed });
+      }
+    }
+
+    /**
+     * Save the current site's baseline-relative controller offset locally.
+     * @param {{x: number, y: number}} position
+     * @returns {Promise<boolean>}
+     */
+    async saveControllerPosition(position) {
+      const normalized = window.VSC.ControllerPosition.normalize(position);
+      if (!normalized) {
+        window.VSC.logger.warn('Refusing to save an invalid controller position');
+        return false;
+      }
+
+      if (!this._loaded) {
+        window.VSC.logger.error('saveControllerPosition() called before settings load');
+        return false;
+      }
+
+      const oldValue = this.settings.controllerPosition;
+      this.settings.controllerPosition = normalized;
+      this._notifySettingsChanged({
+        controllerPosition: { oldValue, newValue: normalized },
+      });
+
+      try {
+        await window.VSC.StorageManager.setControllerPosition(normalized);
+        window.VSC.logger.info('Controller position saved successfully');
+        return true;
+      } catch (error) {
+        window.VSC.logger.error(`Failed to save controller position: ${error.message}`);
+        return false;
       }
     }
 
