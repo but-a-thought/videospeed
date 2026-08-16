@@ -32,6 +32,7 @@ class VideoController {
     // Transient reset memory (not persisted, instance-specific)
     this.speedBeforeReset = null;
     this.positionBeforeJump = null;
+    this.controllerBaseline = { top: 0, left: 0 };
 
     // Attach controller to video element first (needed for adjustSpeed)
     target.vsc = this;
@@ -144,6 +145,9 @@ class VideoController {
 
     // Create custom element wrapper to avoid CSS conflicts
     const wrapper = document.createElement('vsc-controller');
+    // initializeControls() applies the persisted offset before it returns, so
+    // expose the wrapper to the instance as soon as it exists.
+    this.div = wrapper;
 
     // Apply all CSS classes at once to prevent race condition flash
     const cssClasses = ['vsc-controller'];
@@ -192,6 +196,9 @@ class VideoController {
           this.config.settings.quickSpeeds
         );
       }
+      if (changes.controllerPosition && this.video.vsc === this) {
+        this.applyControllerPosition(this.config.settings.controllerPosition);
+      }
     });
 
     // Insert into DOM FIRST — position calculation needs the wrapper in the DOM
@@ -202,15 +209,53 @@ class VideoController {
     // the inner controller stays at (0,0) and the CSS nudge handles placement.
     // Otherwise (wrapper is absolute), compute coordinates for generic sites.
     const computedPosition = getComputedStyle(wrapper).position;
+    const innerController = window.VSC.ShadowDOMManager.getController(shadow);
     if (computedPosition !== 'relative') {
       const position = window.VSC.ShadowDOMManager.calculatePosition(this.video);
-      const innerController = window.VSC.ShadowDOMManager.getController(shadow);
       innerController.style.top = position.top;
       innerController.style.left = position.left;
     }
+    this.captureControllerBaseline(innerController);
+    this.applyControllerPosition(this.config.settings.controllerPosition);
 
     window.VSC.logger.debug('initializeControls End');
     return wrapper;
+  }
+
+  /** Capture the controller's site-aware natural starting point. @private */
+  captureControllerBaseline(innerController) {
+    this.controllerBaseline = {
+      top: Number.parseInt(innerController?.style.top, 10) || 0,
+      left: Number.parseInt(innerController?.style.left, 10) || 0,
+    };
+  }
+
+  /**
+   * Apply a validated baseline-relative position, or reset to the baseline.
+   * @param {{x: number, y: number}|null} position
+   */
+  applyControllerPosition(position) {
+    const innerController = this.div?.shadowRoot?.querySelector('#controller');
+    if (!innerController) {
+      return;
+    }
+    const normalized = window.VSC.ControllerPosition.normalize(position) || { x: 0, y: 0 };
+    innerController.style.left = `${this.controllerBaseline.left + normalized.x}px`;
+    innerController.style.top = `${this.controllerBaseline.top + normalized.y}px`;
+  }
+
+  /**
+   * Read the current drag displacement from the natural baseline.
+   * @returns {{x: number, y: number}}
+   */
+  getControllerPositionOffset() {
+    const innerController = this.div?.shadowRoot?.querySelector('#controller');
+    const left = Number.parseInt(innerController?.style.left, 10) || 0;
+    const top = Number.parseInt(innerController?.style.top, 10) || 0;
+    return {
+      x: left - this.controllerBaseline.left,
+      y: top - this.controllerBaseline.top,
+    };
   }
 
   /**
@@ -423,6 +468,11 @@ class VideoController {
     if (this.div?.flashTimer !== undefined) {
       clearTimeout(this.div.flashTimer);
       this.div.flashTimer = undefined;
+    }
+    const savePositionButton = this.div?.shadowRoot?.querySelector('button.save-position');
+    if (savePositionButton?.positionSavedTimer !== undefined) {
+      clearTimeout(savePositionButton.positionSavedTimer);
+      savePositionButton.positionSavedTimer = undefined;
     }
 
     if (this.controllerRepairTimer !== undefined) {

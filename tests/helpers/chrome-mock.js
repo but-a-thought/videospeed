@@ -16,6 +16,8 @@ const mockStorage = {
   logLevel: 1,
 };
 
+const mockLocalStorage = {};
+
 // Track onChanged listeners so set() can fire them
 const onChangedListeners = [];
 
@@ -65,6 +67,97 @@ export const chromeMock = {
       clear: (callback) => {
         Object.keys(mockStorage).forEach((key) => delete mockStorage[key]);
         setTimeout(() => callback && callback(), 10);
+      },
+    },
+    local: {
+      get: (keys, callback) => {
+        const operation = new Promise((resolve) => {
+          setTimeout(() => {
+            let result;
+            if (keys === null || keys === undefined) {
+              result = { ...mockLocalStorage };
+            } else if (typeof keys === 'string') {
+              result =
+                mockLocalStorage[keys] === undefined ? {} : { [keys]: mockLocalStorage[keys] };
+            } else if (Array.isArray(keys)) {
+              result = Object.fromEntries(
+                keys
+                  .filter((key) => mockLocalStorage[key] !== undefined)
+                  .map((key) => [key, mockLocalStorage[key]])
+              );
+            } else {
+              result = Object.keys(keys).reduce((acc, key) => {
+                acc[key] = mockLocalStorage[key] === undefined ? keys[key] : mockLocalStorage[key];
+                return acc;
+              }, {});
+            }
+            callback?.(result);
+            resolve(result);
+          }, 10);
+        });
+        return typeof callback === 'function' ? undefined : operation;
+      },
+      set: (items, callback) => {
+        const changes = {};
+        for (const [key, newValue] of Object.entries(items)) {
+          changes[key] = { oldValue: mockLocalStorage[key], newValue };
+        }
+        Object.assign(mockLocalStorage, items);
+        setTimeout(() => {
+          for (const listener of onChangedListeners) {
+            listener(changes, 'local');
+          }
+        }, 5);
+        const operation = new Promise((resolve) => {
+          setTimeout(() => {
+            callback?.();
+            resolve();
+          }, 10);
+        });
+        return typeof callback === 'function' ? undefined : operation;
+      },
+      remove: (keys, callback) => {
+        const keysArray = Array.isArray(keys) ? keys : [keys];
+        const changes = {};
+        for (const key of keysArray) {
+          if (mockLocalStorage[key] !== undefined) {
+            changes[key] = { oldValue: mockLocalStorage[key], newValue: undefined };
+            delete mockLocalStorage[key];
+          }
+        }
+        setTimeout(() => {
+          for (const listener of onChangedListeners) {
+            listener(changes, 'local');
+          }
+        }, 5);
+        const operation = new Promise((resolve) => {
+          setTimeout(() => {
+            callback?.();
+            resolve();
+          }, 10);
+        });
+        return typeof callback === 'function' ? undefined : operation;
+      },
+      clear: (callback) => {
+        const changes = Object.fromEntries(
+          Object.entries(mockLocalStorage).map(([key, oldValue]) => [
+            key,
+            { oldValue, newValue: undefined },
+          ])
+        );
+        Object.keys(mockLocalStorage).forEach((key) => delete mockLocalStorage[key]);
+        setTimeout(() => {
+          for (const listener of onChangedListeners) {
+            listener(changes, 'local');
+          }
+        }, 5);
+        const operation = new Promise((resolve) => {
+          setTimeout(() => {
+            callback?.();
+            resolve();
+          }, 10);
+        });
+        return typeof callback === 'function' ? undefined : operation;
       },
     },
     onChanged: {
@@ -142,6 +235,7 @@ export function resetMockStorage() {
     blacklist: 'www.instagram.com\nx.com',
     logLevel: 1,
   });
+  Object.keys(mockLocalStorage).forEach((key) => delete mockLocalStorage[key]);
   // Clear all onChanged listeners between tests
   onChangedListeners.length = 0;
 }
@@ -152,6 +246,11 @@ export function resetMockStorage() {
  */
 export function getMockStorage() {
   return mockStorage;
+}
+
+/** Get a direct reference to device-local mock storage. */
+export function getMockLocalStorage() {
+  return mockLocalStorage;
 }
 
 /**

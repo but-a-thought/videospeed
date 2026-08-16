@@ -169,6 +169,17 @@ class ShadowDOMManager {
         line-height: 20px;
         box-sizing: border-box;
       }
+
+      button.save-position {
+        min-width: 24px;
+        padding-left: 4px;
+        padding-right: 4px;
+      }
+
+      button.save-position.saved {
+        background: #2e7d32;
+        color: #ffffff;
+      }
     `;
     shadow.appendChild(style);
 
@@ -210,6 +221,13 @@ class ShadowDOMManager {
       { action: 'slower', text: '−', class: '' },
       { action: 'faster', text: '+', class: '' },
       { action: 'advance', text: '»', class: 'rw' },
+      {
+        action: 'save-position',
+        text: '💾',
+        class: 'save-position',
+        title: 'Save controller position for this website',
+        ariaLabel: 'Save controller position for this website',
+      },
     ];
 
     buttons.forEach((btnConfig) => {
@@ -217,6 +235,12 @@ class ShadowDOMManager {
       button.setAttribute('data-action', btnConfig.action);
       if (btnConfig.class) {
         button.className = btnConfig.class;
+      }
+      if (btnConfig.title) {
+        button.title = btnConfig.title;
+      }
+      if (btnConfig.ariaLabel) {
+        button.setAttribute('aria-label', btnConfig.ariaLabel);
       }
       button.textContent = btnConfig.text;
       controls.appendChild(button);

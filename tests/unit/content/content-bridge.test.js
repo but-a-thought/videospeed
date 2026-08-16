@@ -18,6 +18,7 @@ import {
   cleanupChromeMock,
   resetMockStorage,
   getMockStorage,
+  getMockLocalStorage,
 } from '../../helpers/chrome-mock.js';
 
 const docEl = document.documentElement;
@@ -274,7 +275,7 @@ describe('content-bridge', () => {
       expect(events).toHaveLength(0);
 
       resolveSettings({ ...getMockStorage(), lastSpeed: 2.5 });
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20);
 
       expect(events).toHaveLength(1);
       expect(events[0].detail.settings.lastSpeed).toBe(2.5);
@@ -303,7 +304,7 @@ describe('content-bridge', () => {
       onChanged({ enabled: { oldValue: true, newValue: false } }, 'sync');
       onChanged({ enabled: { oldValue: false, newValue: true } }, 'sync');
       resolveSettings({ ...getMockStorage(), enabled: true });
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20);
 
       expect(events.some((event) => event.detail?.type === 'VSC_TEARDOWN')).toBe(true);
       expect(events.find((event) => event.type === 'VSC_SETTINGS_READY')?.detail).toEqual({
@@ -322,7 +323,7 @@ describe('content-bridge', () => {
       vi.resetModules();
       await import('../../../src/entries/content-bridge.js');
       docEl.dispatchEvent(new CustomEvent('VSC_REQUEST_SETTINGS'));
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20);
 
       expect(events).toEqual([{ type: 'VSC_SETTINGS_READY', detail: { abort: true } }]);
     });
@@ -447,6 +448,81 @@ describe('content-bridge', () => {
       docEl.dispatchEvent(new CustomEvent('VSC_WRITE_STORAGE', { detail: null }));
       await vi.advanceTimersByTimeAsync(20);
       expect(storage.lastSpeed).toBe(originalSpeed);
+    });
+  });
+
+  describe('controller position local storage boundary', () => {
+    it('loads only the current hostname position into the settings payload', async () => {
+      getMockLocalStorage()['controllerPosition:localhost'] = { x: -20, y: 150 };
+      getMockLocalStorage()['controllerPosition:private.example'] = { x: 400, y: 500 };
+      const { events, cleanup } = collectEvents('VSC_SETTINGS_READY');
+      eventCleanup = cleanup;
+
+      await loadBridge();
+      await requestSettings();
+
+      expect(events[0].detail.settings.controllerPosition).toEqual({ x: -20, y: 150 });
+      expect(JSON.stringify(events[0].detail)).not.toContain('private.example');
+    });
+
+    it('writes a valid offset only under the bridge-derived hostname key', async () => {
+      await loadBridge();
+      await requestSettings();
+
+      docEl.dispatchEvent(
+        new CustomEvent('VSC_WRITE_CONTROLLER_POSITION', {
+          detail: { x: 35, y: -40, hostname: 'attacker.example' },
+        })
+      );
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(getMockLocalStorage()['controllerPosition:localhost']).toEqual({ x: 35, y: -40 });
+      expect(getMockLocalStorage()['controllerPosition:attacker.example']).toBeUndefined();
+    });
+
+    it('rejects malformed and excessive offsets', async () => {
+      await loadBridge();
+      await requestSettings();
+
+      for (const detail of [{ x: 1.5, y: 2 }, { x: 10001, y: 0 }, { x: '35', y: -40 }, null]) {
+        docEl.dispatchEvent(new CustomEvent('VSC_WRITE_CONTROLLER_POSITION', { detail }));
+      }
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(getMockLocalStorage()['controllerPosition:localhost']).toBeUndefined();
+    });
+
+    it('relays current-site local changes as a singular runtime setting', async () => {
+      const { events, cleanup } = collectEvents('VSC_STORAGE_CHANGED');
+      eventCleanup = cleanup;
+      const onChanged = await loadBridge();
+      await requestSettings();
+
+      onChanged(
+        {
+          'controllerPosition:localhost': {
+            oldValue: { x: 1, y: 2 },
+            newValue: undefined,
+          },
+          'controllerPosition:other.example': {
+            oldValue: { x: 3, y: 4 },
+            newValue: { x: 5, y: 6 },
+          },
+        },
+        'local'
+      );
+
+      expect(events).toEqual([
+        {
+          type: 'VSC_STORAGE_CHANGED',
+          detail: {
+            controllerPosition: {
+              oldValue: { x: 1, y: 2 },
+              newValue: null,
+            },
+          },
+        },
+      ]);
     });
   });
 

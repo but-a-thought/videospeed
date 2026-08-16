@@ -647,6 +647,67 @@ button:active {
   font-size: 14px;
 }
 
+.saved-controller-positions-row {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-controller-positions-row label {
+  flex: none;
+}
+
+#saved-controller-positions {
+  width: 100%;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.saved-position-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--md-outline-variant);
+  font-size: 13px;
+}
+
+.saved-position-row:last-child {
+  border-bottom: none;
+}
+
+.saved-position-site {
+  overflow-wrap: anywhere;
+}
+
+.saved-position-row code {
+  color: var(--md-on-surface-variant);
+}
+
+.saved-position-remove {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.saved-position-empty {
+  padding: 10px 12px;
+  color: var(--md-on-surface-variant);
+  font-size: 13px;
+}
+
+#clear-controller-positions {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 16px;
+}
+
+#clear-controller-positions:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* Controller CSS textarea */
 .row:has(#controllerCSS) {
   flex-direction: column;
@@ -848,6 +909,19 @@ button:active {
   .site-rules-header,
   .row.site-rule {
     grid-template-columns: 1fr 50px 70px 32px;
+  }
+
+  .saved-position-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .saved-position-row code {
+    grid-column: 1;
+  }
+
+  .saved-position-remove {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 
   .site-rules-header {

@@ -93,6 +93,139 @@ export default async function runBasicE2ETests() {
       assert.true(controllerFound, 'Speed controller should appear');
     });
 
+    await runTest(
+      `Controller position should save and restore per website in ${browserName}`,
+      async () => {
+        const expected = { x: 37, y: 83 };
+        await page.evaluate((position) => {
+          const video = document.querySelector('video');
+          const controller = video?.vsc;
+          const inner = controller?.div?.shadowRoot?.querySelector('#controller');
+          const button = controller?.div?.shadowRoot?.querySelector('button.save-position');
+          inner.style.left = `${controller.controllerBaseline.left + position.x}px`;
+          inner.style.top = `${controller.controllerBaseline.top + position.y}px`;
+          button.click();
+        }, expected);
+        await page.waitForFunction(
+          (position) => {
+            const saved = window.VSC_controller?.config?.settings?.controllerPosition;
+            return saved?.x === position.x && saved?.y === position.y;
+          },
+          { timeout: 10000 },
+          expected
+        );
+        await sleep(250);
+
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        assert.true(await waitForController(page, 10000), 'Controller should return after reload');
+        const restored = await page.evaluate(
+          () => document.querySelector('video')?.vsc?.getControllerPositionOffset?.() || null
+        );
+        assert.equal(
+          JSON.stringify(restored),
+          JSON.stringify(expected),
+          'Reloaded controller should restore the saved baseline-relative offset'
+        );
+
+        if (browserName !== 'chrome') {
+          await page.evaluate(() => {
+            const controller = document.querySelector('video')?.vsc;
+            const inner = controller?.div?.shadowRoot?.querySelector('#controller');
+            inner.style.left = `${controller.controllerBaseline.left}px`;
+            inner.style.top = `${controller.controllerBaseline.top}px`;
+            controller.div.shadowRoot.querySelector('button.save-position').click();
+          });
+          await sleep(250);
+        }
+      }
+    );
+
+    if (browserName === 'chrome') {
+      await runTest(
+        'Options should remove, clear, and reset saved controller positions',
+        async () => {
+          const optionsPage = await browser.newPage();
+          try {
+            await optionsPage.goto(`${extensionOrigin}/ui/options/options.html`, {
+              waitUntil: 'domcontentloaded',
+            });
+            await optionsPage.waitForFunction(
+              () => document.querySelector('.saved-position-site')?.textContent === '127.0.0.1',
+              { timeout: 10000 }
+            );
+            const savedText = await optionsPage.evaluate(
+              () => document.querySelector('.saved-position-row')?.textContent || ''
+            );
+            assert.true(
+              savedText.includes('x: 37px, y: 83px'),
+              'Options should show the saved offset'
+            );
+
+            await optionsPage.evaluate(() =>
+              document.querySelector('.saved-position-remove').click()
+            );
+            await optionsPage.waitForFunction(
+              () =>
+                document.querySelector('.saved-position-empty') &&
+                document.querySelector('#clear-controller-positions').disabled,
+              { timeout: 10000 }
+            );
+            await page.waitForFunction(
+              () =>
+                window.VSC_controller?.config?.settings?.controllerPosition === null &&
+                document.querySelector('video')?.vsc?.getControllerPositionOffset?.().x === 0,
+              { timeout: 10000 }
+            );
+
+            await optionsPage.evaluate(
+              () =>
+                new Promise((resolve) =>
+                  chrome.storage.local.set(
+                    {
+                      'controllerPosition:one.example': { x: 1, y: 2 },
+                      'controllerPosition:two.example': { x: 3, y: 4 },
+                    },
+                    resolve
+                  )
+                )
+            );
+            await optionsPage.reload({ waitUntil: 'domcontentloaded' });
+            await optionsPage.waitForFunction(
+              () => document.querySelectorAll('.saved-position-row').length === 2,
+              { timeout: 10000 }
+            );
+            await optionsPage.evaluate(() =>
+              document.querySelector('#clear-controller-positions').click()
+            );
+            await optionsPage.waitForFunction(
+              () => document.querySelector('.saved-position-empty'),
+              { timeout: 10000 }
+            );
+
+            await optionsPage.evaluate(
+              () =>
+                new Promise((resolve) =>
+                  chrome.storage.local.set(
+                    { 'controllerPosition:reset.example': { x: 5, y: 6 } },
+                    resolve
+                  )
+                )
+            );
+            await optionsPage.evaluate(() => document.querySelector('#restore').click());
+            await optionsPage.waitForFunction(
+              async () => {
+                const stored = await chrome.storage.local.get(null);
+                return !Object.keys(stored).some((key) => key.startsWith('controllerPosition:'));
+              },
+              { timeout: 10000 }
+            );
+          } finally {
+            await optionsPage.close();
+          }
+        }
+      );
+    }
+
     await runTest('Initial video speed should be 1.0x', async () => {
       const speed = await getVideoSpeed(page);
       assert.equal(speed, 1, 'Initial speed should be 1.0x');

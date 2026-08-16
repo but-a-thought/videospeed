@@ -12,6 +12,10 @@
 
 import { isBlacklisted } from '../utils/blacklist.js';
 import { matchSiteRule } from '../utils/site-pattern.js';
+import {
+  getControllerPositionStorageKey,
+  normalizeControllerPosition,
+} from '../utils/controller-position.js';
 
 // Speed limits for page→bridge write validation.
 // Duplicated from constants.js (ISOLATED world can't import page modules).
@@ -66,6 +70,7 @@ function init() {
 
     let disabledForDocument = false;
     let bridgeActive = false;
+    const controllerPositionKey = getControllerPositionStorageKey(location);
 
     // Start the read without awaiting it. The request listener is installed in
     // this same task, so MAIN cannot fire into the old listener-free window.
@@ -73,11 +78,20 @@ function init() {
       console.error('[VSC] Initial settings load failed:', error);
       return null;
     });
+    const controllerPositionReady = controllerPositionKey
+      ? chrome.storage.local.get(controllerPositionKey).catch((error) => {
+          console.error('[VSC] Initial controller position load failed:', error);
+          return {};
+        })
+      : Promise.resolve({});
 
     docEl.addEventListener(
       'VSC_REQUEST_SETTINGS',
       async () => {
-        const settings = await settingsReady;
+        const [settings, localPositions] = await Promise.all([
+          settingsReady,
+          controllerPositionReady,
+        ]);
         if (!settings) {
           dispatchAbort();
           return;
@@ -95,6 +109,9 @@ function init() {
         const publicSettings = { ...settings };
         delete publicSettings.blacklist;
         delete publicSettings.enabled;
+        publicSettings.controllerPosition = normalizeControllerPosition(
+          localPositions[controllerPositionKey]
+        );
         bridgeActive = true;
         dispatchToPage('VSC_SETTINGS_READY', {
           settings: publicSettings,
@@ -105,6 +122,20 @@ function init() {
     );
 
     chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'local') {
+        if (!bridgeActive || !controllerPositionKey || !changes[controllerPositionKey]) {
+          return;
+        }
+        const change = changes[controllerPositionKey];
+        dispatchToPage('VSC_STORAGE_CHANGED', {
+          controllerPosition: {
+            oldValue: normalizeControllerPosition(change.oldValue),
+            newValue: normalizeControllerPosition(change.newValue),
+          },
+        });
+        return;
+      }
+
       if (namespace !== 'sync') {
         return;
       }
@@ -164,6 +195,24 @@ function init() {
       }
     };
     docEl.addEventListener('VSC_WRITE_STORAGE', handleWriteStorage);
+
+    const handleWriteControllerPosition = (e) => {
+      try {
+        if (!bridgeActive || !controllerPositionKey) {
+          return;
+        }
+        const position = normalizeControllerPosition(e.detail);
+        if (!position) {
+          return;
+        }
+        chrome.storage.local.set({ [controllerPositionKey]: position });
+      } catch (err) {
+        if (err.message?.includes('Extension context invalidated')) {
+          docEl.removeEventListener('VSC_WRITE_CONTROLLER_POSITION', handleWriteControllerPosition);
+        }
+      }
+    };
+    docEl.addEventListener('VSC_WRITE_CONTROLLER_POSITION', handleWriteControllerPosition);
   } catch (error) {
     console.error('[VSC] Bridge init failed:', error);
   }

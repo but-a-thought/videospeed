@@ -10,6 +10,11 @@ import '../../utils/logger.js';
 // Storage and settings - depends on utils
 import '../../core/storage-manager.js';
 import '../../core/settings.js';
+import {
+  CONTROLLER_POSITION_KEY_PREFIX,
+  normalizeControllerPosition,
+  parseControllerPositionStorageKey,
+} from '../../utils/controller-position.js';
 
 // UI helpers
 import { createRow } from './row-renderer.js';
@@ -18,6 +23,75 @@ import { createRow } from './row-renderer.js';
 window.VSC = window.VSC || {};
 
 let keyBindings = [];
+
+/** Read every valid device-local controller position, sorted by scope. */
+async function getSavedControllerPositions() {
+  const stored = await chrome.storage.local.get(null);
+  return Object.entries(stored)
+    .map(([key, value]) => ({
+      key,
+      scope: parseControllerPositionStorageKey(key),
+      position: normalizeControllerPosition(value),
+    }))
+    .filter(({ scope, position }) => scope && position)
+    .sort((a, b) => a.scope.localeCompare(b.scope));
+}
+
+/** Render the device-local saved-position management list. */
+async function renderSavedControllerPositions() {
+  const container = document.getElementById('saved-controller-positions');
+  const clearButton = document.getElementById('clear-controller-positions');
+  if (!container || !clearButton) {
+    return;
+  }
+
+  const entries = await getSavedControllerPositions();
+  container.replaceChildren();
+  clearButton.disabled = entries.length === 0;
+
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'saved-position-empty';
+    empty.textContent = 'No saved controller positions.';
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const { key, scope, position } of entries) {
+    const row = document.createElement('div');
+    row.className = 'saved-position-row';
+
+    const site = document.createElement('span');
+    site.className = 'saved-position-site';
+    site.textContent = scope === 'file:' ? 'Local files' : scope;
+
+    const offset = document.createElement('code');
+    offset.textContent = `x: ${position.x}px, y: ${position.y}px`;
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary saved-position-remove';
+    remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove saved controller position for ${site.textContent}`);
+    remove.addEventListener('click', async () => {
+      await chrome.storage.local.remove(key);
+      await renderSavedControllerPositions();
+    });
+
+    row.append(site, offset, remove);
+    container.appendChild(row);
+  }
+}
+
+/** Remove all device-local saved-position keys without touching other local data. */
+async function clearSavedControllerPositions() {
+  const stored = await chrome.storage.local.get(null);
+  const keys = Object.keys(stored).filter((key) => key.startsWith(CONTROLLER_POSITION_KEY_PREFIX));
+  if (keys.length > 0) {
+    await chrome.storage.local.remove(keys);
+  }
+  await renderSavedControllerPositions();
+}
 
 /**
  * Lightweight CSS syntax highlighter for the controller CSS editor.
@@ -873,6 +947,8 @@ async function restore_options() {
         setShortcutInput(row.querySelector('.customKey'), item);
       }
     }
+
+    await renderSavedControllerPositions();
   } catch (error) {
     console.error('Failed to restore options:', error);
     document.getElementById('status').textContent = `Error loading options: ${error.message}`;
@@ -893,6 +969,7 @@ async function restore_defaults() {
 
     // Clear all storage
     await window.VSC.StorageManager.clear();
+    await clearSavedControllerPositions();
 
     // Ensure VideoSpeedConfig singleton is initialized
     if (!window.VSC.videoSpeedConfig) {
@@ -937,6 +1014,7 @@ async function export_settings() {
     }
     await window.VSC.videoSpeedConfig.load();
     const settings = { ...window.VSC.videoSpeedConfig.settings };
+    delete settings.controllerPosition;
 
     const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -996,6 +1074,9 @@ async function handleImportFile(event) {
       throw new Error('File does not look like a Video Speed Controller settings file');
     }
     imported.quickSpeeds = window.VSC.Constants.normalizeQuickSpeeds(imported.quickSpeeds);
+    // Controller positions are device-local and never imported from synced
+    // settings files, including files produced by experimental builds.
+    delete imported.controllerPosition;
 
     // Ensure config is initialized
     if (!window.VSC.videoSpeedConfig) {
@@ -1082,6 +1163,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('add-site-rule').addEventListener('click', () => {
     add_site_rule();
     markDirty();
+  });
+
+  document.getElementById('clear-controller-positions').addEventListener('click', async () => {
+    await clearSavedControllerPositions();
   });
 
   document.getElementById('restore').addEventListener('click', async (e) => {
