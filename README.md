@@ -64,6 +64,7 @@ we don't read at a fixed pace, and we shouldn't watch at one either.
   Coursera, podcasts, local files, etc.
 - **Video and audio** - controls both `<video>` and `<audio>` elements.
 - **Fine-grained speed** - 0.07x to 16x in configurable increments.
+- **Quick-speed buttons** - two always-visible controller presets for one-click speed changes.
 - **Per-site speed rules** - set a default playback speed for specific domains
   (e.g., always 2x on lecture sites).
 - **Per-site disable** - turn off the controller on sites where you don't

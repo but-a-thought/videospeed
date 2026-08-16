@@ -81,6 +81,24 @@ describe('SettingsRaceCondition', () => {
     window.VSC.StorageManager.set = originalSet;
   });
 
+  it('normalizes quick speeds and notifies live subscribers', async () => {
+    const config = new window.VSC.VideoSpeedConfig();
+    await config.load();
+    const listener = vi.fn();
+    const unsubscribe = config.onSettingsChanged(listener);
+
+    simulateExternalStorageWrite({ quickSpeeds: [1.75, 99] });
+
+    expect(config.settings.quickSpeeds).toEqual([1.75, 2.0]);
+    expect(listener).toHaveBeenCalledWith({
+      quickSpeeds: expect.objectContaining({ newValue: [1.75, 2.0] }),
+    });
+
+    unsubscribe();
+    simulateExternalStorageWrite({ quickSpeeds: [1.25, 2.5] });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it('debounced lastSpeed save writes ONLY lastSpeed', async () => {
     const config = new window.VSC.VideoSpeedConfig();
     await config.load();

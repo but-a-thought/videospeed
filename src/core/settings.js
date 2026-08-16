@@ -7,11 +7,15 @@ window.VSC = window.VSC || {};
 if (!window.VSC.VideoSpeedConfig) {
   class VideoSpeedConfig {
     constructor() {
-      this.settings = { ...window.VSC.Constants.DEFAULT_SETTINGS };
+      this.settings = {
+        ...window.VSC.Constants.DEFAULT_SETTINGS,
+        quickSpeeds: [...window.VSC.Constants.DEFAULT_QUICK_SPEEDS],
+      };
       this.pendingSave = null;
       this.saveTimer = null;
       this.SAVE_DELAY = 1000; // 1 second
       this._loaded = false;
+      this.settingsChangeListeners = new Set();
 
       // Keep in-memory settings fresh when other contexts write to storage
       // (options-page changes — key bindings, visibility, opacity — reach
@@ -27,6 +31,7 @@ if (!window.VSC.VideoSpeedConfig) {
     _setupStorageListener() {
       try {
         window.VSC.StorageManager.onChanged((changes) => {
+          const appliedChanges = {};
           for (const [key, change] of Object.entries(changes)) {
             if (!(key in this.settings) || change.newValue === undefined) {
               continue;
@@ -46,15 +51,49 @@ if (!window.VSC.VideoSpeedConfig) {
               continue;
             }
 
-            this.settings[key] = change.newValue;
+            const newValue =
+              key === 'quickSpeeds'
+                ? window.VSC.Constants.normalizeQuickSpeeds(change.newValue)
+                : change.newValue;
+            this.settings[key] = newValue;
+            appliedChanges[key] = { ...change, newValue };
             window.VSC.logger.debug(`Settings updated from storage change: ${key}`);
           }
+          this._notifySettingsChanged(appliedChanges);
         });
       } catch (e) {
         // StorageManager may not be fully available yet (e.g. during tests).
         // Non-fatal — the listener just won't be active.
         window.VSC.logger.debug(`Could not set up storage change listener: ${e.message}`);
       }
+    }
+
+    /**
+     * Subscribe to live settings changes. Returns an idempotent cleanup
+     * function so controller lifecycles do not leak listeners.
+     * @param {Function} listener
+     * @returns {Function}
+     */
+    onSettingsChanged(listener) {
+      if (typeof listener !== 'function') {
+        return () => {};
+      }
+      this.settingsChangeListeners.add(listener);
+      return () => this.settingsChangeListeners.delete(listener);
+    }
+
+    /** @private */
+    _notifySettingsChanged(changes) {
+      if (!changes || Object.keys(changes).length === 0) {
+        return;
+      }
+      this.settingsChangeListeners.forEach((listener) => {
+        try {
+          listener(changes);
+        } catch (error) {
+          window.VSC.logger.error(`Settings change listener failed: ${error.message}`);
+        }
+      });
     }
 
     /**
@@ -163,6 +202,7 @@ if (!window.VSC.VideoSpeedConfig) {
         this.settings.startHidden = Boolean(storage.startHidden);
         this.settings.controllerOpacity = Number(storage.controllerOpacity);
         this.settings.controllerButtonSize = Number(storage.controllerButtonSize);
+        this.settings.quickSpeeds = window.VSC.Constants.normalizeQuickSpeeds(storage.quickSpeeds);
         // One-time migration: drop legacy controllerCSS key, reset to new model.
         if (storage.controllerCSS !== null) {
           window.VSC.StorageManager.remove(['controllerCSS']);
@@ -218,7 +258,14 @@ if (!window.VSC.VideoSpeedConfig) {
     }
 
     async save(newSettings = {}) {
-      const keys = Object.keys(newSettings);
+      const normalizedSettings = { ...newSettings };
+      if ('quickSpeeds' in normalizedSettings) {
+        normalizedSettings.quickSpeeds = window.VSC.Constants.normalizeQuickSpeeds(
+          normalizedSettings.quickSpeeds
+        );
+      }
+
+      const keys = Object.keys(normalizedSettings);
       if (keys.length === 0) {
         return true;
       }
@@ -234,11 +281,16 @@ if (!window.VSC.VideoSpeedConfig) {
       }
 
       // Update in-memory settings immediately
-      this.settings = { ...this.settings, ...newSettings };
+      this.settings = { ...this.settings, ...normalizedSettings };
+      this._notifySettingsChanged(
+        Object.fromEntries(
+          keys.map((key) => [key, { oldValue: undefined, newValue: normalizedSettings[key] }])
+        )
+      );
 
       // Check if this is a speed-only update that should be debounced
       if (keys.length === 1 && keys[0] === 'lastSpeed') {
-        this.pendingSave = newSettings.lastSpeed;
+        this.pendingSave = normalizedSettings.lastSpeed;
 
         if (this.saveTimer) {
           clearTimeout(this.saveTimer);
@@ -261,7 +313,7 @@ if (!window.VSC.VideoSpeedConfig) {
       }
 
       try {
-        await window.VSC.StorageManager.set(newSettings);
+        await window.VSC.StorageManager.set(normalizedSettings);
       } catch (error) {
         window.VSC.logger.error(`Failed to save settings: ${error.message}`);
         return false;

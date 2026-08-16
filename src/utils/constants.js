@@ -29,6 +29,13 @@ if (!window.VSC.Constants.DEFAULT_SETTINGS) {
 
   window.VSC.Constants.DEFAULT_CONTROLLER_CSS = DEFAULT_CONTROLLER_CSS;
 
+  const SPEED_LIMITS = {
+    MIN: 0.07, // Video min rate per Chromium source
+    MAX: 16, // Maximum playback speed in Chrome per Chromium source
+  };
+
+  const DEFAULT_QUICK_SPEEDS = Object.freeze([1.5, 2.0]);
+
   const DEFAULT_SETTINGS = {
     schemaVersion: 1,
     lastSpeed: 1.0, // default 1x
@@ -39,6 +46,7 @@ if (!window.VSC.Constants.DEFAULT_SETTINGS) {
     startHidden: false, // default: false
     controllerOpacity: 0.3, // default: 0.3
     controllerButtonSize: 14,
+    quickSpeeds: [...DEFAULT_QUICK_SPEEDS],
     customCSS: '', // user's additional CSS injected alongside the built-in defaults
     keyBindings: PREDEFINED_ACTIONS.map((action) => ({
       action,
@@ -68,6 +76,29 @@ meet.google.com`.replace(regStrip, ''),
 
   window.VSC.Constants.formatSpeed = formatSpeed;
 
+  /**
+   * Normalize the two quick-speed slots independently. Corrupt or missing
+   * values fall back without discarding a valid sibling slot.
+   * @param {*} value
+   * @returns {[number, number]}
+   */
+  const normalizeQuickSpeeds = (value) =>
+    DEFAULT_QUICK_SPEEDS.map((fallback, index) => {
+      const candidate = Array.isArray(value) ? value[index] : undefined;
+      if (
+        typeof candidate !== 'number' ||
+        !Number.isFinite(candidate) ||
+        candidate < SPEED_LIMITS.MIN ||
+        candidate > SPEED_LIMITS.MAX
+      ) {
+        return fallback;
+      }
+      return Number(candidate.toFixed(2));
+    });
+
+  window.VSC.Constants.DEFAULT_QUICK_SPEEDS = DEFAULT_QUICK_SPEEDS;
+  window.VSC.Constants.normalizeQuickSpeeds = normalizeQuickSpeeds;
+
   const LOG_LEVELS = {
     NONE: 1,
     ERROR: 2,
@@ -83,11 +114,6 @@ meet.google.com`.replace(regStrip, ''),
     RESET_SPEED: 'VSC_RESET_SPEED',
     TOGGLE_DISPLAY: 'VSC_TOGGLE_DISPLAY',
     TEARDOWN: 'VSC_TEARDOWN',
-  };
-
-  const SPEED_LIMITS = {
-    MIN: 0.07, // Video min rate per Chromium source
-    MAX: 16, // Maximum playback speed in Chrome per Chromium source
   };
 
   const CONTROLLER_SIZE_LIMITS = {

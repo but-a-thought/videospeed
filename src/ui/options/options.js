@@ -655,6 +655,32 @@ function validate() {
 
   const regEndsWithFlags = window.VSC.Constants.regEndsWithFlags;
 
+  const quickSpeeds = [
+    document.getElementById('quickSpeed1').value,
+    document.getElementById('quickSpeed2').value,
+  ];
+  for (let index = 0; index < quickSpeeds.length; index++) {
+    const rawValue = quickSpeeds[index];
+    const speed = Number(rawValue);
+    if (
+      rawValue.trim() === '' ||
+      !Number.isFinite(speed) ||
+      speed < window.VSC.Constants.SPEED_LIMITS.MIN ||
+      speed > window.VSC.Constants.SPEED_LIMITS.MAX
+    ) {
+      status.textContent = `Error: Quick speed button ${index + 1} must be between ${
+        window.VSC.Constants.SPEED_LIMITS.MIN
+      } and ${window.VSC.Constants.SPEED_LIMITS.MAX}.`;
+      status.classList.add('show', 'error');
+      valid = false;
+      window.validationTimeout = setTimeout(() => {
+        status.textContent = '';
+        status.classList.remove('show', 'error');
+      }, 5000);
+      return valid;
+    }
+  }
+
   // Validate site rules
   const rules = collectSiteRules();
   for (const rule of rules) {
@@ -727,6 +753,10 @@ async function save_options() {
     const startHidden = document.getElementById('startHidden').checked;
     const controllerOpacity = Number(document.getElementById('controllerOpacity').value);
     const controllerButtonSize = Number(document.getElementById('controllerButtonSize').value);
+    const quickSpeeds = [
+      Number(document.getElementById('quickSpeed1').value),
+      Number(document.getElementById('quickSpeed2').value),
+    ];
     const logLevel = parseInt(document.getElementById('logLevel').value);
     const siteRules = collectSiteRules();
     const customCSS = document.getElementById('controllerCSS').value;
@@ -767,6 +797,7 @@ async function save_options() {
       startHidden: startHidden,
       controllerOpacity: controllerOpacity,
       controllerButtonSize: controllerButtonSize,
+      quickSpeeds: quickSpeeds,
       logLevel: logLevel,
       keyBindings: keyBindings,
       siteRules: siteRules,
@@ -813,6 +844,8 @@ async function restore_options() {
     document.getElementById('startHidden').checked = storage.startHidden;
     document.getElementById('controllerOpacity').value = storage.controllerOpacity;
     document.getElementById('controllerButtonSize').value = storage.controllerButtonSize;
+    document.getElementById('quickSpeed1').value = storage.quickSpeeds[0];
+    document.getElementById('quickSpeed2').value = storage.quickSpeeds[1];
     document.getElementById('logLevel').value = storage.logLevel;
     document.getElementById('controllerCSS').value = storage.customCSS ?? '';
 
@@ -962,6 +995,7 @@ async function handleImportFile(event) {
     if (!imported || typeof imported !== 'object' || !Array.isArray(imported.keyBindings)) {
       throw new Error('File does not look like a Video Speed Controller settings file');
     }
+    imported.quickSpeeds = window.VSC.Constants.normalizeQuickSpeeds(imported.quickSpeeds);
 
     // Ensure config is initialized
     if (!window.VSC.videoSpeedConfig) {
