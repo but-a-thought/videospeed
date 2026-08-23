@@ -50,6 +50,10 @@ class VideoController {
     // Create UI
     this.div = this.initializeControls();
 
+    // Keep the draggable speed badge within the media rectangle, including
+    // after responsive layout or speed text changes alter either box.
+    this.setupControllerBounds();
+
     // A Hover Zoom DASH preview becomes one logical player once both its
     // video and audio controllers exist. Refresh both wrappers together so
     // only the primary video badge remains visible.
@@ -242,6 +246,7 @@ class VideoController {
     const normalized = window.VSC.ControllerPosition.normalize(position) || { x: 0, y: 0 };
     innerController.style.left = `${this.controllerBaseline.left + normalized.x}px`;
     innerController.style.top = `${this.controllerBaseline.top + normalized.y}px`;
+    window.VSC.DragHandler.constrainToMedia(this.video);
   }
 
   /**
@@ -305,6 +310,23 @@ class VideoController {
     window.VSC.logger.debug(`Controller inserted using ${positioning.insertionMethod} method`);
   }
 
+  /** Keep the speed badge inside the media as either element resizes. @private */
+  setupControllerBounds() {
+    window.VSC.DragHandler.constrainToMedia(this.video);
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    this.controllerBoundsObserver = new ResizeObserver(() => {
+      if (this.video.vsc === this) {
+        window.VSC.DragHandler.constrainToMedia(this.video);
+      }
+    });
+    this.controllerBoundsObserver.observe(this.video);
+    this.controllerBoundsObserver.observe(this.speedIndicator);
+  }
+
   /** Set up proactive repair for sites that recycle player DOM around a live video. @private */
   setupControllerPlacementRepair() {
     if (!window.VSC.siteHandlerManager.shouldRepairControllerPlacement()) {
@@ -360,6 +382,7 @@ class VideoController {
       this.observeControllerParent();
       this.refreshSynchronizedMediaState();
       this.updateVisibility();
+      window.VSC.DragHandler.constrainToMedia(this.video);
       window.VSC.logger.info('Reattached controller after media DOM recycling');
     }, 0);
   }
@@ -486,6 +509,10 @@ class VideoController {
     if (this.controllerPlacementObserver) {
       this.controllerPlacementObserver.disconnect();
       this.controllerPlacementObserver = null;
+    }
+    if (this.controllerBoundsObserver) {
+      this.controllerBoundsObserver.disconnect();
+      this.controllerBoundsObserver = null;
     }
     if (this.unsubscribeSettingsChanges) {
       this.unsubscribeSettingsChanges();

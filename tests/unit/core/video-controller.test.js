@@ -142,6 +142,71 @@ describe('VideoController', () => {
     expect(controller.speedIndicator).toBeDefined();
   });
 
+  it('reconstrains resized media and disconnects its bounds observer on removal', async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const constrain = vi.spyOn(window.VSC.DragHandler, 'constrainToMedia');
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    let resizeCallback;
+
+    globalThis.ResizeObserver = class {
+      constructor(callback) {
+        resizeCallback = callback;
+      }
+
+      observe = observe;
+      disconnect = disconnect;
+    };
+
+    try {
+      const config = window.VSC.videoSpeedConfig;
+      await config.load();
+      const eventManager = new window.VSC.EventManager(config, null);
+      const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+      const mockVideo = createMockVideo();
+      mockDOM.container.appendChild(mockVideo);
+
+      const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+      const shadowController = controller.div.shadowRoot.querySelector('#controller');
+
+      expect(constrain).toHaveBeenCalledWith(mockVideo);
+      expect(observe).toHaveBeenCalledWith(mockVideo);
+      expect(observe).toHaveBeenCalledWith(controller.speedIndicator);
+
+      mockVideo.getBoundingClientRect = () => ({
+        left: 100,
+        top: 50,
+        width: 200,
+        height: 100,
+        right: 300,
+        bottom: 150,
+      });
+      controller.speedIndicator.getBoundingClientRect = () => ({
+        left: 340,
+        top: 170,
+        width: 40,
+        height: 20,
+        right: 380,
+        bottom: 190,
+      });
+      shadowController.style.left = '340px';
+      shadowController.style.top = '170px';
+
+      resizeCallback();
+
+      expect(shadowController.style.left).toBe('260px');
+      expect(shadowController.style.top).toBe('130px');
+
+      controller.remove();
+
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(controller.controllerBoundsObserver).toBeNull();
+    } finally {
+      constrain.mockRestore();
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   it('updates quick-speed buttons live and unsubscribes during removal', async () => {
     const config = new window.VSC.VideoSpeedConfig();
     await config.load();

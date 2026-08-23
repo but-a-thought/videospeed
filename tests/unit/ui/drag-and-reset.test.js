@@ -11,6 +11,25 @@ import { createMockVideo, createMockDOM } from '../../helpers/test-utils.js';
 import { vi } from 'vitest';
 let mockDOM;
 
+const rect = (left, top, width, height) => ({
+  left,
+  top,
+  width,
+  height,
+  right: left + width,
+  bottom: top + height,
+});
+
+const pointerEvent = (type, clientX, clientY, pointerId = 1) => {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperties(event, {
+    clientX: { value: clientX },
+    clientY: { value: clientY },
+    pointerId: { value: pointerId },
+  });
+  return event;
+};
+
 describe('DragAndReset', () => {
   beforeEach(() => {
     installChromeMock();
@@ -92,6 +111,113 @@ describe('DragAndReset', () => {
     window.VSC.DragHandler.handleDrag(mockVideo, mouseEvent);
 
     expect(shadowController.classList.contains('dragging')).toBe(true);
+  });
+
+  it('clamps pointer dragging to all four edges of the media', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const shadowController = controller.div.shadowRoot.querySelector('#controller');
+    const draggable = controller.div.shadowRoot.querySelector('.draggable');
+
+    mockVideo.getBoundingClientRect = () => rect(100, 50, 200, 100);
+    draggable.getBoundingClientRect = () => {
+      const left = parseFloat(shadowController.style.left) || 0;
+      const top = parseFloat(shadowController.style.top) || 0;
+      return rect(left, top, 40, 20);
+    };
+    shadowController.style.left = '120px';
+    shadowController.style.top = '70px';
+    draggable.setPointerCapture = () => {};
+
+    draggable.dispatchEvent(pointerEvent('pointerdown', 120, 70));
+    draggable.dispatchEvent(pointerEvent('pointermove', 500, 500));
+
+    expect(shadowController.style.left).toBe('260px');
+    expect(shadowController.style.top).toBe('130px');
+
+    draggable.dispatchEvent(pointerEvent('pointermove', -300, -300));
+
+    expect(shadowController.style.left).toBe('100px');
+    expect(shadowController.style.top).toBe('50px');
+    draggable.dispatchEvent(pointerEvent('pointerup', -300, -300));
+  });
+
+  it('leaves an in-bounds badge unchanged without considering the expanded controller', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const shadowController = controller.div.shadowRoot.querySelector('#controller');
+    const draggable = controller.div.shadowRoot.querySelector('.draggable');
+
+    mockVideo.getBoundingClientRect = () => rect(100, 50, 200, 100);
+    draggable.getBoundingClientRect = () => rect(120, 70, 40, 20);
+    shadowController.getBoundingClientRect = () => rect(120, 70, 400, 200);
+    shadowController.style.left = '120px';
+    shadowController.style.top = '70px';
+
+    window.VSC.DragHandler.constrainToMedia(mockVideo);
+
+    expect(shadowController.style.left).toBe('120px');
+    expect(shadowController.style.top).toBe('70px');
+  });
+
+  it('aligns an oversized badge with the leading media edges', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const shadowController = controller.div.shadowRoot.querySelector('#controller');
+    const draggable = controller.div.shadowRoot.querySelector('.draggable');
+
+    mockVideo.getBoundingClientRect = () => rect(100, 50, 50, 40);
+    draggable.getBoundingClientRect = () => rect(200, 140, 80, 60);
+    shadowController.style.left = '200px';
+    shadowController.style.top = '140px';
+
+    window.VSC.DragHandler.constrainToMedia(mockVideo);
+
+    expect(shadowController.style.left).toBe('100px');
+    expect(shadowController.style.top).toBe('50px');
+  });
+
+  it('clamps a saved controller offset when it is applied', async () => {
+    const config = window.VSC.videoSpeedConfig;
+    await config.load();
+    const eventManager = new window.VSC.EventManager(config, null);
+    const actionHandler = new window.VSC.ActionHandler(config, eventManager);
+
+    const mockVideo = createMockVideo();
+    mockDOM.container.appendChild(mockVideo);
+    const controller = new window.VSC.VideoController(mockVideo, null, config, actionHandler);
+    const shadowController = controller.div.shadowRoot.querySelector('#controller');
+    const draggable = controller.div.shadowRoot.querySelector('.draggable');
+
+    mockVideo.getBoundingClientRect = () => rect(100, 50, 200, 100);
+    draggable.getBoundingClientRect = () => {
+      const left = parseFloat(shadowController.style.left) || 0;
+      const top = parseFloat(shadowController.style.top) || 0;
+      return rect(left, top, 40, 20);
+    };
+
+    controller.applyControllerPosition({ x: 500, y: 500 });
+
+    expect(shadowController.style.left).toBe('260px');
+    expect(shadowController.style.top).toBe('130px');
   });
 
   // --- Double-click-to-reset tests ---
