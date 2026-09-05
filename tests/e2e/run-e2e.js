@@ -27,8 +27,15 @@ const suites = {
   display: 'display-toggle.e2e.js',
   arbitration: 'speed-arbitration.e2e.js',
   lifecycle: 'lifecycle.e2e.js',
+  bounds: 'controller-bounds.e2e.js',
 };
-const chromeDefault = [suites.basic, suites.display, suites.arbitration, suites.lifecycle];
+const chromeDefault = [
+  suites.basic,
+  suites.display,
+  suites.arbitration,
+  suites.lifecycle,
+  suites.bounds,
+];
 const firefoxDefault = [suites.basic, suites.display];
 
 function parseArguments(args) {

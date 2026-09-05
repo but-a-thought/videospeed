@@ -172,6 +172,7 @@ describe('VideoController', () => {
       expect(constrain).toHaveBeenCalledWith(mockVideo);
       expect(observe).toHaveBeenCalledWith(mockVideo);
       expect(observe).toHaveBeenCalledWith(controller.speedIndicator);
+      expect(observe).toHaveBeenCalledWith(mockVideo.parentElement);
 
       mockVideo.getBoundingClientRect = () => ({
         left: 100,
@@ -191,12 +192,14 @@ describe('VideoController', () => {
       });
       shadowController.style.left = '340px';
       shadowController.style.top = '170px';
+      controller.captureRequestedControllerPosition();
 
       resizeCallback();
 
       expect(shadowController.style.left).toBe('260px');
       expect(shadowController.style.top).toBe('130px');
 
+      disconnect.mockClear();
       controller.remove();
 
       expect(disconnect).toHaveBeenCalledOnce();
@@ -204,6 +207,44 @@ describe('VideoController', () => {
     } finally {
       constrain.mockRestore();
       globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('coalesces layout checks and cancels pending work and listeners on removal', async () => {
+    const config = new window.VSC.VideoSpeedConfig();
+    await config.load();
+    const actionHandler = new window.VSC.ActionHandler(
+      config,
+      new window.VSC.EventManager(config, null)
+    );
+    const video = createMockVideo();
+    mockDOM.container.appendChild(video);
+    const controller = new window.VSC.VideoController(video, null, config, actionHandler);
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(123);
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame');
+    try {
+      video.dispatchEvent({ type: 'resize' });
+      video.dispatchEvent({ type: 'loadedmetadata' });
+      expect(requestFrame).toHaveBeenCalledOnce();
+      const pending = requestFrame.mock.calls[0][0];
+      controller.remove();
+      expect(cancelFrame).toHaveBeenCalledWith(123);
+      expect(controller.controllerBoundsFrame).toBeUndefined();
+      expect(controller.controllerLayoutObserver).toBeNull();
+      requestFrame.mockClear();
+      video.dispatchEvent({ type: 'resize' });
+      video.dispatchEvent({ type: 'loadedmetadata' });
+      expect(requestFrame).not.toHaveBeenCalled();
+      const constrain = vi.spyOn(window.VSC.DragHandler, 'constrainToMedia');
+      try {
+        pending();
+        expect(constrain).not.toHaveBeenCalled();
+      } finally {
+        constrain.mockRestore();
+      }
+    } finally {
+      requestFrame.mockRestore();
+      cancelFrame.mockRestore();
     }
   });
 

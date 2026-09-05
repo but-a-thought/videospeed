@@ -1,5 +1,7 @@
 # Video Speed Controller — Community
 
+**Current version: 0.11.4**
+
 **Video Speed Controller** gives you fine-grained control over any HTML5 video
 or audio element, on any site.
 

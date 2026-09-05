@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Controller bounds fixture</title>
+    <style>
+      body {
+        margin: 0;
+      }
+      .tiktok-web-player {
+        position: relative;
+        margin: 50px 100px;
+        width: 800px;
+        height: 600px;
+        overflow: hidden;
+        transform-origin: top left;
+      }
+      .video-layer {
+        height: 0;
+      }
+      video {
+        display: block;
+        width: 800px;
+        height: 600px;
+      }
+    </style>
+  </head>
+  <body>
+    <section data-e2e="feed-video">
+      <div class="tiktok-web-player">
+        <div class="video-layer"><video src="fixtures/test.wav" muted loop controls></video></div>
+      </div>
+    </section>
+  </body>
+</html>

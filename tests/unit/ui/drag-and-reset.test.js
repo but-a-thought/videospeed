@@ -141,6 +141,12 @@ describe('DragAndReset', () => {
     expect(shadowController.style.left).toBe('260px');
     expect(shadowController.style.top).toBe('130px');
 
+    // A later layout check must retain an unsaved drag instead of restoring
+    // the position loaded when this controller was created.
+    controller.updateControllerBounds();
+    expect(shadowController.style.left).toBe('260px');
+    expect(shadowController.style.top).toBe('130px');
+
     draggable.dispatchEvent(pointerEvent('pointermove', -300, -300));
 
     expect(shadowController.style.left).toBe('100px');

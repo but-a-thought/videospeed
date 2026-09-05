@@ -246,7 +246,17 @@ class VideoController {
     const normalized = window.VSC.ControllerPosition.normalize(position) || { x: 0, y: 0 };
     innerController.style.left = `${this.controllerBaseline.left + normalized.x}px`;
     innerController.style.top = `${this.controllerBaseline.top + normalized.y}px`;
+    this.captureRequestedControllerPosition();
     window.VSC.DragHandler.constrainToMedia(this.video);
+  }
+
+  /** Keep the user's chosen position separate from temporary bounds corrections. */
+  captureRequestedControllerPosition() {
+    const innerController = this.div?.shadowRoot?.querySelector('#controller');
+    this.requestedControllerPosition = {
+      left: parseFloat(innerController?.style.left) || 0,
+      top: parseFloat(innerController?.style.top) || 0,
+    };
   }
 
   /**
@@ -312,19 +322,62 @@ class VideoController {
 
   /** Keep the speed badge inside the media as either element resizes. @private */
   setupControllerBounds() {
-    window.VSC.DragHandler.constrainToMedia(this.video);
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    this.controllerBoundsObserver = new ResizeObserver(() => {
-      if (this.video.vsc === this) {
+    const view = this.video.ownerDocument.defaultView;
+    this.updateControllerBounds = () => {
+      if (this.video.vsc === this && this.video.isConnected) {
+        // An incoming feed item may briefly have only a thin visible strip.
+        // Always constrain from the chosen position so that transient clipping
+        // cannot become the starting point for every subsequent layout.
+        const innerController = this.div.shadowRoot.querySelector('#controller');
+        if (this.requestedControllerPosition) {
+          innerController.style.left = `${this.requestedControllerPosition.left}px`;
+          innerController.style.top = `${this.requestedControllerPosition.top}px`;
+        }
         window.VSC.DragHandler.constrainToMedia(this.video);
       }
-    });
-    this.controllerBoundsObserver.observe(this.video);
-    this.controllerBoundsObserver.observe(this.speedIndicator);
+    };
+    this.scheduleControllerBounds = () => {
+      if (this.controllerBoundsFrame !== undefined) {
+        return;
+      }
+      this.controllerBoundsFrame = view.requestAnimationFrame(() => {
+        this.controllerBoundsFrame = undefined;
+        this.updateControllerBounds();
+      });
+    };
+    this.updateControllerBounds();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.controllerBoundsObserver = new ResizeObserver(this.updateControllerBounds);
+    }
+    // ResizeObserver does not report translations or class/style changes that
+    // move a same-size video within a clipped player.
+    this.controllerLayoutObserver = new MutationObserver(this.scheduleControllerBounds);
+    this.observeControllerBounds();
+    view.addEventListener('resize', this.scheduleControllerBounds);
+    view.addEventListener('scroll', this.scheduleControllerBounds, true);
+    for (const event of ['loadedmetadata', 'resize']) {
+      this.video.addEventListener(event, this.scheduleControllerBounds);
+    }
+    for (const event of ['transitionend', 'animationend']) {
+      this.video.ownerDocument.addEventListener(event, this.scheduleControllerBounds, true);
+    }
+  }
+
+  /** Refresh geometry observation after a virtualized player moves the host. */
+  observeControllerBounds() {
+    this.controllerBoundsObserver?.disconnect();
+    this.controllerLayoutObserver.disconnect();
+    const elements = window.VSC.DragHandler.getBoundsAncestors(this.video);
+    elements.add(this.video);
+    for (const element of elements) {
+      this.controllerBoundsObserver?.observe(element);
+      this.controllerLayoutObserver.observe(element, {
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+      });
+    }
+    this.controllerBoundsObserver?.observe(this.speedIndicator);
   }
 
   /** Set up proactive repair for sites that recycle player DOM around a live video. @private */
@@ -380,9 +433,10 @@ class VideoController {
       }
       this.insertIntoDOM(this.video.ownerDocument, this.div);
       this.observeControllerParent();
+      this.observeControllerBounds();
       this.refreshSynchronizedMediaState();
       this.updateVisibility();
-      window.VSC.DragHandler.constrainToMedia(this.video);
+      this.updateControllerBounds();
       window.VSC.logger.info('Reattached controller after media DOM recycling');
     }, 0);
   }
@@ -513,6 +567,21 @@ class VideoController {
     if (this.controllerBoundsObserver) {
       this.controllerBoundsObserver.disconnect();
       this.controllerBoundsObserver = null;
+    }
+    this.controllerLayoutObserver?.disconnect();
+    this.controllerLayoutObserver = null;
+    const view = this.video.ownerDocument.defaultView;
+    if (this.controllerBoundsFrame !== undefined) {
+      view.cancelAnimationFrame(this.controllerBoundsFrame);
+      this.controllerBoundsFrame = undefined;
+    }
+    view.removeEventListener('resize', this.scheduleControllerBounds);
+    view.removeEventListener('scroll', this.scheduleControllerBounds, true);
+    for (const event of ['loadedmetadata', 'resize']) {
+      this.video.removeEventListener(event, this.scheduleControllerBounds);
+    }
+    for (const event of ['transitionend', 'animationend']) {
+      this.video.ownerDocument.removeEventListener(event, this.scheduleControllerBounds, true);
     }
     if (this.unsubscribeSettingsChanges) {
       this.unsubscribeSettingsChanges();
