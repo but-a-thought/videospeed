@@ -67,7 +67,7 @@ class ControlsManager {
         'click',
         (e) => {
           const target = e.currentTarget;
-          if (target.classList.contains('quick-speed')) {
+          if (target.dataset.speed !== undefined) {
             this.actionHandler.runAction('SET_SPEED', Number(target.dataset.speed), e);
           } else {
             this.actionHandler.runAction(

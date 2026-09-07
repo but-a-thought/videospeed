@@ -222,6 +222,14 @@ class ShadowDOMManager {
       { action: 'faster', text: '+', class: '' },
       { action: 'advance', text: '»', class: 'rw' },
       {
+        action: 'SET_SPEED',
+        speed: 1.0,
+        text: '1',
+        class: 'reset-speed',
+        title: 'Reset speed to 1.0×',
+        ariaLabel: 'Reset speed to 1.0×',
+      },
+      {
         action: 'save-position',
         text: '💾',
         class: 'save-position',
@@ -233,6 +241,9 @@ class ShadowDOMManager {
     buttons.forEach((btnConfig) => {
       const button = document.createElement('button');
       button.setAttribute('data-action', btnConfig.action);
+      if (btnConfig.speed !== undefined) {
+        button.dataset.speed = String(btnConfig.speed);
+      }
       if (btnConfig.class) {
         button.className = btnConfig.class;
       }
